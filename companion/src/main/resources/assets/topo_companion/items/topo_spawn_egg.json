@@ -1,0 +1,6 @@
+{
+	"model": {
+		"type": "minecraft:model",
+		"model": "topo_companion:item/topo_spawn_egg"
+	}
+}

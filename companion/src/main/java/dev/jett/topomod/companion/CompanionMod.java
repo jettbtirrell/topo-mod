@@ -1,5 +1,8 @@
 package dev.jett.topomod.companion;
 
+import dev.jett.topomod.companion.registry.ModEntities;
+import dev.jett.topomod.companion.registry.ModItems;
+
 import net.fabricmc.api.ModInitializer;
 
 import net.minecraft.resources.Identifier;
@@ -14,6 +17,8 @@ public class CompanionMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		ModEntities.register();
+		ModItems.register();
 		LOGGER.info("Topo Companion loaded");
 	}
 
