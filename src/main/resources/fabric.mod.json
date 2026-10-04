@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "topo_mod",
+	"version": "${version}",
+	"name": "Topo Mod",
+	"description": "A Fabric mod that runs on both client and dedicated server.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/topo_mod/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.jett.topomod.TopoMod"
+		],
+		"client": [
+			"dev.jett.topomod.client.TopoModClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
