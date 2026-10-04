@@ -1,0 +1,5 @@
+// Bundle: no code of its own. Embeds the other mods as jar-in-jar so one file installs everything.
+dependencies {
+	include project(':companion')
+	include project(':damage-numbers')
+}

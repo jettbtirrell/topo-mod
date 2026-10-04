@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "topo_damage_numbers",
+	"version": "${version}",
+	"name": "Topo Damage Numbers",
+	"description": "Shows floating damage numbers when entities are hit.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/topo_damage_numbers/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.jett.topomod.damagenumbers.DamageNumbersMod"
+		],
+		"client": [
+			"dev.jett.topomod.damagenumbers.client.DamageNumbersClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

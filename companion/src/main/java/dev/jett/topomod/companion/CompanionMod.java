@@ -1,4 +1,4 @@
-package dev.jett.topomod;
+package dev.jett.topomod.companion;
 
 import net.fabricmc.api.ModInitializer;
 
@@ -8,13 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 // Common entrypoint: runs on both the client and the dedicated server.
-public class TopoMod implements ModInitializer {
-	public static final String MOD_ID = "topo_mod";
+public class CompanionMod implements ModInitializer {
+	public static final String MOD_ID = "topo_companion";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	@Override
 	public void onInitialize() {
-		LOGGER.info("Topo Mod loaded");
+		LOGGER.info("Topo Companion loaded");
 	}
 
 	public static Identifier id(String path) {

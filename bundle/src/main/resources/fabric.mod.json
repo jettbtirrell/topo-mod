@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "topo_mod",
+	"version": "${version}",
+	"name": "Topo Mod",
+	"description": "All-in-one bundle of Topo Companion and Topo Damage Numbers.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/topo_mod/icon.png",
+	"environment": "*",
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

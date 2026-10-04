@@ -9,5 +9,6 @@ pluginManagement {
 	}
 }
 
-// Should match your mod id
 rootProject.name = 'topo_mod'
+
+include 'companion', 'damage-numbers', 'bundle'
