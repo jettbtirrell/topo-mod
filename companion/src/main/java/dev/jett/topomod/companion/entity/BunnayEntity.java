@@ -7,7 +7,9 @@ import net.minecraft.core.Holder;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.DamageTypeTags;
@@ -15,10 +17,15 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.AnimationState;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
@@ -37,6 +44,7 @@ import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import dev.jett.topomod.companion.CompanionMod;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gameevent.DynamicGameEventListener;
@@ -76,6 +84,13 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int IDLE_MIN_TICKS = 180;
 	private static final int IDLE_EXTRA_TICKS = 40;
 
+	// Fighting with a bamboo: it holds it in its right hand, and each hit does a little extra damage.
+	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
+	private static final Identifier BAMBOO_DAMAGE_ID = CompanionMod.id("bamboo_damage");
+	/** How fast the ready stance eases in and out, per tick (it takes 4 ticks to raise and about 7 to lower). */
+	private static final float READY_RISE = 0.25F;
+	private static final float READY_FALL = 0.15F;
+
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	private static final EntityDataAccessor<Boolean> DATA_BIG_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
@@ -85,6 +100,9 @@ public class BunnayEntity extends TamableAnimal {
 	/** Plays the idle animation on the client. */
 	public final AnimationState idleAnimationState = new AnimationState();
 	private int idleAnimationTimeout;
+	/** 0 to 1, client side: how far into the ready stance (weapon raised, closing on a target) it is. */
+	private float readyProgress;
+	private float readyProgressO;
 
 	// Dancing to a jukebox, the way the allay does: it listens for the jukebox game events, remembers which jukebox
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
@@ -104,6 +122,38 @@ public class BunnayEntity extends TamableAnimal {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_BIG_HOPPING, false);
 		entityData.define(DATA_DANCING, false);
+	}
+
+	public boolean isHoldingBamboo() {
+		return this.getMainHandItem().is(Items.BAMBOO);
+	}
+
+	/** How far into the ready stance it is, for the renderer, smoothed between ticks. */
+	public float getReadyProgress(float partialTick) {
+		return Mth.lerp(partialTick, this.readyProgressO, this.readyProgress);
+	}
+
+	// Mobs spawn left-handed now and then; the model and the held item layer only handle the right hand.
+	@Override
+	public HumanoidArm getMainArm() {
+		return HumanoidArm.RIGHT;
+	}
+
+	@Override
+	public boolean doHurtTarget(ServerLevel level, Entity target) {
+		// The bamboo has no attack stat of its own, so add its bonus just for this swing.
+		boolean armed = this.isHoldingBamboo();
+		AttributeInstance attack = this.getAttribute(Attributes.ATTACK_DAMAGE);
+		if (armed) {
+			attack.addTransientModifier(new AttributeModifier(BAMBOO_DAMAGE_ID, BAMBOO_BONUS_DAMAGE, AttributeModifier.Operation.ADD_VALUE));
+		}
+		try {
+			return super.doHurtTarget(level, target);
+		} finally {
+			if (armed) {
+				attack.removeModifier(BAMBOO_DAMAGE_ID);
+			}
+		}
 	}
 
 	public boolean isDancing() {
@@ -167,6 +217,9 @@ public class BunnayEntity extends TamableAnimal {
 		if (this.level().isClientSide()) {
 			this.bigHopAnimationState.animateWhen(this.isBigHopping(), this.tickCount);
 			this.tickIdleAnimation();
+			this.readyProgressO = this.readyProgress;
+			boolean ready = this.isAggressive() && this.isHoldingBamboo();
+			this.readyProgress = Mth.clamp(this.readyProgress + (ready ? READY_RISE : -READY_FALL), 0.0F, 1.0F);
 		} else if (this.bigHopCooldown > 0) {
 			this.bigHopCooldown--;
 		}
@@ -201,7 +254,7 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(2, new DanceGoal(this));
 		this.goalSelector.addGoal(2, new BigHopGoal(this));
 		this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.3, true));
-		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
+		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isTamingItem, false));
 		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
 		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
@@ -227,23 +280,62 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	public boolean isFood(ItemStack stack) {
+		return stack.is(Items.CARROT) || stack.is(Items.GOLDEN_CARROT);
+	}
+
+	/** Wild bunnays are tamed, and tempted over, with seeds. Carrots are for feeding a tame one (see isFood). */
+	private boolean isTamingItem(ItemStack stack) {
 		return stack.is(Items.WHEAT_SEEDS);
+	}
+
+	/** Health a carrot or golden carrot restores. */
+	private static float healAmount(ItemStack food) {
+		return food.is(Items.GOLDEN_CARROT) ? 8.0F : 4.0F;
+	}
+
+	// It can't breed with its own kind (see getBreedOffspring), so feeding it never puts it in love mode.
+	@Override
+	public boolean canFallInLove() {
+		return false;
 	}
 
 	@Override
 	public InteractionResult mobInteract(Player player, InteractionHand hand) {
 		ItemStack stack = player.getItemInHand(hand);
 
+		if (this.isTame() && this.isOwnedBy(player)) {
+			// Handing it a bamboo equips it straight away.
+			if (stack.is(Items.BAMBOO) && this.getMainHandItem().isEmpty()) {
+				if (!this.level().isClientSide()) {
+					this.setItemSlot(EquipmentSlot.MAINHAND, stack.split(1));
+					this.setGuaranteedDrop(EquipmentSlot.MAINHAND);
+					this.setPersistenceRequired();
+				}
+				return InteractionResult.SUCCESS;
+			}
+			// Sneaking with an empty hand takes it back.
+			if (player.isSecondaryUseActive() && stack.isEmpty() && !this.getMainHandItem().isEmpty()) {
+				if (!this.level().isClientSide()) {
+					// Only take it if it fits in the player's inventory, so it can never be lost.
+					ItemStack held = this.getMainHandItem().copy();
+					if (player.addItem(held)) {
+						this.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+					}
+				}
+				return InteractionResult.SUCCESS;
+			}
+		}
+
 		if (this.isTame()) {
-			// Seeds heal a hurt bunnay.
+			// Carrots heal a hurt bunnay (a golden carrot heals twice as much).
 			if (this.isOwnedBy(player) && this.isFood(stack) && this.getHealth() < this.getMaxHealth()) {
 				if (!this.level().isClientSide()) {
-					this.heal(2.0F);
+					this.heal(healAmount(stack));
 					stack.consume(1, player);
 				}
 				return InteractionResult.SUCCESS;
 			}
-		} else if (this.isFood(stack)) {
+		} else if (this.isTamingItem(stack)) {
 			// Each seed has a one in three chance of taming it (the same odds as the topo).
 			if (!this.level().isClientSide()) {
 				stack.consume(1, player);

@@ -6,6 +6,8 @@ import dev.jett.topomod.companion.entity.BunnayEntity;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
+import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
+import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
 import net.minecraft.resources.Identifier;
 
 public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState, BunnayModel> {
@@ -14,6 +16,7 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 
 	public BunnayRenderer(EntityRendererProvider.Context context) {
 		super(context, new BunnayModel(context.bakeLayer(LAYER)), 0.3F);
+		this.addLayer(new ItemInHandLayer<>(this));
 	}
 
 	@Override
@@ -29,6 +32,8 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 	@Override
 	public void extractRenderState(BunnayEntity entity, BunnayRenderState state, float partialTicks) {
 		super.extractRenderState(entity, state, partialTicks);
+		ArmedEntityRenderState.extractArmedEntityRenderState(entity, state, this.itemModelResolver, partialTicks);
+		state.readyProgress = entity.getReadyProgress(partialTicks);
 		state.bigHopAnimationState.copyFrom(entity.bigHopAnimationState);
 		state.idleAnimationState.copyFrom(entity.idleAnimationState);
 		state.isDancing = entity.isDancing();
