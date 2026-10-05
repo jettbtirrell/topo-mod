@@ -192,9 +192,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 
 		// To the hand, then spin about it, so the item turns about the fist and not about the shoulder.
 		poseStack.translate(side * HAND_TOWARD_BODY / 16.0F, HAND_DOWN / 16.0F, 0.0F);
-		if (right) {
-			poseStack.rotateDegrees(Axis.XP, itemSpinDegrees(state));
-		}
+		poseStack.rotateDegrees(Axis.XP, itemSpinDegrees(state));
 		poseStack.scale(ITEM_SCALE, ITEM_SCALE, ITEM_SCALE);
 
 		// Back out the layer's own offset (in the scaled space, in pixels): it moves the item 1px out to the side, 10px
@@ -249,27 +247,38 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	}
 
 	/**
-	 * Everything that only happens when the bunnay is armed. The arm holds the item with the player's pose (tilted
-	 * forward a little and swinging half as much), raises into a ready stance while it closes on a target, and
-	 * swings when it attacks. An unarmed bunnay is left exactly as the rest of setupAnim made it.
+	 * Everything that only happens when the bunnay is armed, for either hand. An arm holding a weapon holds it with the
+	 * player's pose (tilted forward a little and swinging half as much), raises into a ready stance while it closes on a
+	 * target, and swings when it attacks; with a weapon in each hand they swing in turn. An unarmed bunnay is left exactly
+	 * as the rest of setupAnim made it. The left hand holds a carrot, not a weapon, while it eats.
 	 */
 	private void animateCombat(BunnayRenderState state) {
-		if (state.rightHandItemState.isEmpty()) {
+		boolean rightArmed = !state.rightHandItemState.isEmpty();
+		boolean leftArmed = !state.leftHandItemState.isEmpty() && state.eatProgress <= 0.0F;
+		if (!rightArmed && !leftArmed) {
 			return;
 		}
 
-		// The player's "holding an item" arm pose (HumanoidModel.ArmPose.ITEM).
-		this.rightArm.xRot = this.rightArm.xRot * 0.5F - 0.31415927F;
-
-		// Ready stance (the vex's charge): the weapon arm comes up over the head as it closes on a target, and eases
-		// back down afterward. The other arm keeps swinging as normal.
-		float ready = state.readyProgress;
-		if (ready > 0.0F) {
-			this.rightArm.xRot = Mth.lerp(ready, this.rightArm.xRot, READY_PITCH);
-			this.rightArm.yRot = Mth.lerp(ready, this.rightArm.yRot, READY_YAW);
+		if (rightArmed) {
+			this.poseArmedArm(this.rightArm, state.readyProgress, READY_YAW);
 		}
+		if (leftArmed) {
+			this.poseArmedArm(this.leftArm, state.readyProgress, -READY_YAW);
+		}
+		this.applyAttackSwing(state, rightArmed, leftArmed);
+	}
 
-		this.applyAttackSwing(state);
+	/**
+	 * One arm holding a weapon: the player's "holding an item" pose (HumanoidModel.ArmPose.ITEM), and, as it closes on a
+	 * target, the ready stance (the vex's charge, much slighter), eased in and out by the entity. The yaw is mirrored for
+	 * the left arm.
+	 */
+	private void poseArmedArm(ModelPart arm, float ready, float readyYaw) {
+		arm.xRot = arm.xRot * 0.5F - 0.31415927F;
+		if (ready > 0.0F) {
+			arm.xRot = Mth.lerp(ready, arm.xRot, READY_PITCH);
+			arm.yRot = Mth.lerp(ready, arm.yRot, readyYaw);
+		}
 	}
 
 	/**
@@ -277,12 +286,16 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	 * arm whips up and over and back, driven by the attack progress. The only change is that the shoulders are 2.5px
 	 * from the body's center here, not the player's 5.
 	 */
-	private void applyAttackSwing(BunnayRenderState state) {
+	private void applyAttackSwing(BunnayRenderState state, boolean rightArmed, boolean leftArmed) {
 		float swing = state.swingAnimation;
 		if (swing <= 0.0F || state.currentSwing == null) {
 			return;
 		}
 		HumanoidArm attackArm = state.currentSwing.hand().asArm(state.mainArm);
+		// Only an arm that is holding a weapon swings.
+		if (!(attackArm == HumanoidArm.RIGHT ? rightArmed : leftArmed)) {
+			return;
+		}
 		ModelPart arm = attackArm == HumanoidArm.RIGHT ? this.rightArm : this.leftArm;
 		ModelPart body = this.root.getChild("body");
 

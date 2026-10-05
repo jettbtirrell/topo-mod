@@ -21,6 +21,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.AgeableMob;
@@ -64,6 +65,8 @@ import net.minecraft.world.level.gameevent.EntityPositionSource;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.gameevent.GameEventListener;
 import net.minecraft.world.level.gameevent.PositionSource;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
@@ -108,6 +111,11 @@ public class BunnayEntity extends TamableAnimal {
 	/** The wind burst's shove on a foe: this fast away from the bunnay, and this fast straight up (0.9 is about 4 blocks of height). */
 	private static final double WIND_BURST_HORIZONTAL = 0.5;
 	private static final double WIND_BURST_VERTICAL = 0.9;
+	/**
+	 * With a weapon in each hand it attacks faster: it may swing this many ticks before its usual 20 tick wait between
+	 * swings is up, so 4 means a swing every 16 ticks instead of 20, 25% faster. Raise it for a bigger bonus.
+	 */
+	private static final int DUAL_WIELD_ATTACK_HEAD_START_TICKS = 4;
 	/** How fast the ready stance eases in and out, per tick (it takes 4 ticks to raise and about 7 to lower). */
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
@@ -147,8 +155,10 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float EAT_RISE = 0.2F;
 	private static final float EAT_FALL = 0.15F;
 
-	/** Synced so the client can show the eating pose. */
+	/** Synced so the client can show the eating pose... */
 	private static final EntityDataAccessor<Boolean> DATA_EATING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
+	/** ...and the food it has in its hand while it eats (empty the rest of the time). */
+	private static final EntityDataAccessor<ItemStack> DATA_EATING_FOOD = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.ITEM_STACK);
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -168,6 +178,13 @@ public class BunnayEntity extends TamableAnimal {
 	/** Server side: ticks into the carrot being eaten, and the wait before the next one. */
 	private int eatTicks;
 	private int eatCooldown;
+	/**
+	 * The carrots it eats. They are not in a hand (both hands hold weapons); it takes one out to eat, which is shown by
+	 * swapping the carrot into its left hand for the meal, like a player switching to food and back.
+	 */
+	private final SimpleContainer food = new SimpleContainer(1);
+	/** The hand it attacked with last. With a weapon in each hand it swings them in turn. */
+	private InteractionHand attackHand = InteractionHand.MAIN_HAND;
 
 	// Dancing to a jukebox, the way the allay does: it listens for the jukebox game events, remembers which jukebox
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
@@ -189,11 +206,45 @@ public class BunnayEntity extends TamableAnimal {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_BIG_HOPPING, false);
 		entityData.define(DATA_EATING, false);
+		entityData.define(DATA_EATING_FOOD, ItemStack.EMPTY);
 		entityData.define(DATA_DANCING, false);
 	}
 
 	public boolean isEating() {
 		return this.entityData.get(DATA_EATING);
+	}
+
+	/** The carrot in its hand while it is eating, for the renderer; empty when it is not. */
+	public ItemStack getEatingFood() {
+		return this.entityData.get(DATA_EATING_FOOD);
+	}
+
+	/** The container behind the screen's food slot. */
+	public SimpleContainer getFoodContainer() {
+		return this.food;
+	}
+
+	@Override
+	protected void addAdditionalSaveData(ValueOutput output) {
+		super.addAdditionalSaveData(output);
+		output.store("Food", ItemStack.OPTIONAL_CODEC, this.food.getItem(0));
+	}
+
+	@Override
+	protected void readAdditionalSaveData(ValueInput input) {
+		super.readAdditionalSaveData(input);
+		input.read("Food", ItemStack.OPTIONAL_CODEC).ifPresent(stack -> this.food.setItem(0, stack));
+	}
+
+	// The carrots in its food slot are dropped when it dies, like what it is holding.
+	@Override
+	protected void dropCustomDeathLoot(ServerLevel level, DamageSource source, boolean killedByPlayer) {
+		super.dropCustomDeathLoot(level, source, killedByPlayer);
+		ItemStack stack = this.food.getItem(0);
+		if (!stack.isEmpty()) {
+			this.spawnAtLocation(level, stack.copy());
+			this.food.setItem(0, ItemStack.EMPTY);
+		}
 	}
 
 	/** How far into the eating pose it is, for the renderer, smoothed between ticks. */
@@ -229,9 +280,9 @@ public class BunnayEntity extends TamableAnimal {
 
 	/** Starts, plays and finishes eating the carrot in its off hand. The server decides; the client just shows the pose. */
 	private void tickEating() {
-		ItemStack food = this.getOffhandItem();
+		ItemStack stack = this.food.getItem(0);
 		if (this.isEating()) {
-			if (!this.canEat(true) || !isCarrot(food)) {
+			if (!this.canEat(true) || !isCarrot(stack)) {
 				this.stopEating();
 				return;
 			}
@@ -241,32 +292,38 @@ public class BunnayEntity extends TamableAnimal {
 				this.getNavigation().stop();
 			}
 			if (this.eatTicks % 4 == 0 && this.eatTicks < EAT_TICKS) {
-				this.eatEffects(food, 3);
+				this.eatEffects(stack, 3);
 			}
 			if (this.eatTicks >= EAT_TICKS) {
-				this.heal(healAmount(food));
-				food.shrink(1);
-				if (food.isEmpty()) {
-					this.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+				this.heal(healAmount(stack));
+				ItemStack eaten = stack.copyWithCount(1);
+				stack.shrink(1);
+				if (stack.isEmpty()) {
+					this.food.setItem(0, ItemStack.EMPTY);
 				}
-				this.eatEffects(food.isEmpty() ? new ItemStack(Items.CARROT) : food, 8);
+				this.food.setChanged();
+				this.eatEffects(eaten, 8);
 				// Straight on to the next one, with the carrot still in its hand, until it is healed or out of carrots.
-				if (isCarrot(this.getOffhandItem()) && this.canEat(true)) {
+				ItemStack next = this.food.getItem(0);
+				if (isCarrot(next) && this.canEat(true)) {
 					this.eatTicks = 0;
+					this.entityData.set(DATA_EATING_FOOD, next.copyWithCount(1));
 				} else {
 					this.stopEating();
 				}
 			}
 		} else if (this.eatCooldown > 0) {
 			this.eatCooldown--;
-		} else if (isCarrot(food) && this.canEat(false)) {
+		} else if (isCarrot(stack) && this.canEat(false)) {
 			this.eatTicks = 0;
+			this.entityData.set(DATA_EATING_FOOD, stack.copyWithCount(1));
 			this.entityData.set(DATA_EATING, true);
 		}
 	}
 
 	private void stopEating() {
 		this.entityData.set(DATA_EATING, false);
+		this.entityData.set(DATA_EATING_FOOD, ItemStack.EMPTY);
 		this.eatTicks = 0;
 		this.eatCooldown = EAT_COOLDOWN_TICKS;
 	}
@@ -282,16 +339,33 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/** Whether it has a weapon in its main hand; this is what makes it raise the weapon when it closes on a target. */
+	public boolean isDualWielding() {
+		return isHoldable(this.getMainHandItem()) && isHoldable(this.getOffhandItem());
+	}
+
 	public boolean isHoldingWeapon() {
-		return isHoldable(this.getMainHandItem());
+		return isHoldable(this.getMainHandItem()) || isHoldable(this.getOffhandItem());
 	}
 
-	public boolean isHoldingBreezeRod() {
-		return this.getMainHandItem().is(Items.BREEZE_ROD);
+	/**
+	 * Which hand to attack with next: with a weapon in each it swings them in turn, and with only one it uses that one
+	 * (the main hand if it holds nothing at all).
+	 */
+	private InteractionHand chooseAttackHand() {
+		boolean main = isHoldable(this.getMainHandItem());
+		boolean off = isHoldable(this.getOffhandItem());
+		if (this.isDualWielding()) {
+			return this.attackHand == InteractionHand.MAIN_HAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+		}
+		return off ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
 	}
 
-	public boolean isHoldingBlazeRod() {
-		return this.getMainHandItem().is(Items.BLAZE_ROD);
+	// The melee goal swings the main hand; this swaps in the hand it should be, so the swing shows on that arm and
+	// doHurtTarget (which follows straight after) uses that hand's weapon.
+	@Override
+	public void swingForAttack(InteractionHand hand) {
+		this.attackHand = this.chooseAttackHand();
+		super.swingForAttack(this.attackHand);
 	}
 
 	/** Extra damage per hit from what it is holding (neither item has an attack stat of its own). */
@@ -337,7 +411,8 @@ public class BunnayEntity extends TamableAnimal {
 	@Override
 	public boolean doHurtTarget(ServerLevel level, Entity target) {
 		// What it holds has no attack stat of its own, so add its bonus just for this swing.
-		double bonus = weaponBonusDamage(this.getMainHandItem());
+		ItemStack weapon = this.getItemInHand(this.attackHand);
+		double bonus = weaponBonusDamage(weapon);
 		AttributeInstance attack = this.getAttribute(Attributes.ATTACK_DAMAGE);
 		if (bonus > 0.0) {
 			attack.addTransientModifier(new AttributeModifier(WEAPON_DAMAGE_ID, bonus, AttributeModifier.Operation.ADD_VALUE));
@@ -350,10 +425,10 @@ public class BunnayEntity extends TamableAnimal {
 				attack.removeModifier(WEAPON_DAMAGE_ID);
 			}
 		}
-		if (hit && target instanceof LivingEntity victim && this.isHoldingBreezeRod()) {
+		if (hit && target instanceof LivingEntity victim && weapon.is(Items.BREEZE_ROD)) {
 			this.windBurst(level, victim);
 		}
-		if (hit && this.isHoldingBlazeRod()) {
+		if (hit && weapon.is(Items.BLAZE_ROD)) {
 			target.igniteForTicks(BLAZE_ROD_FIRE_TICKS);
 		}
 		return hit;
@@ -468,7 +543,7 @@ public class BunnayEntity extends TamableAnimal {
 		// The leap is priority 1 so it can interrupt the chase (the melee goal is 2), and it cannot be interrupted itself.
 		this.goalSelector.addGoal(1, new LeapGoal(this));
 		this.goalSelector.addGoal(2, new BigHopGoal(this));
-		this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.3, true));
+		this.goalSelector.addGoal(2, new BunnayMeleeGoal(this));
 		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
 		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
@@ -536,18 +611,19 @@ public class BunnayEntity extends TamableAnimal {
 				return InteractionResult.SUCCESS;
 			}
 
-			// Handing it a weapon equips it straight away.
-			if (isHoldable(stack) && this.getMainHandItem().isEmpty()) {
+			// Handing it a weapon equips it straight away, in the main hand or, if that is taken, the off hand.
+			if (isHoldable(stack) && (this.getMainHandItem().isEmpty() || this.getOffhandItem().isEmpty())) {
 				if (!this.level().isClientSide()) {
-					this.setItemSlot(EquipmentSlot.MAINHAND, stack.split(1));
-					this.setGuaranteedDrop(EquipmentSlot.MAINHAND);
+					EquipmentSlot slot = this.getMainHandItem().isEmpty() ? EquipmentSlot.MAINHAND : EquipmentSlot.OFFHAND;
+					this.setItemSlot(slot, stack.split(1));
+					this.setGuaranteedDrop(slot);
 					this.setPersistenceRequired();
 				}
 				return InteractionResult.SUCCESS;
 			}
 
 			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more. At full health the carrot goes into
-			// its off hand instead, one at a time, for it to eat later when it is hurt.
+			// its food slot instead, one at a time, for it to eat later when it is hurt.
 			if (this.isFood(stack)) {
 				if (this.getHealth() < this.getMaxHealth()) {
 					if (!this.level().isClientSide()) {
@@ -556,15 +632,16 @@ public class BunnayEntity extends TamableAnimal {
 					}
 					return InteractionResult.SUCCESS;
 				}
-				ItemStack held = this.getOffhandItem();
+				ItemStack held = this.food.getItem(0);
 				if (held.isEmpty() || (ItemStack.isSameItemSameComponents(held, stack) && held.getCount() < held.getMaxStackSize())) {
 					if (!this.level().isClientSide()) {
 						ItemStack one = stack.copyWithCount(1);
 						stack.consume(1, player);
 						if (held.isEmpty()) {
-							this.setItemSlot(EquipmentSlot.OFFHAND, one);
+							this.food.setItem(0, one);
 						} else {
 							held.grow(1);
+							this.food.setChanged();
 						}
 						this.setPersistenceRequired();
 					}
@@ -894,6 +971,22 @@ public class BunnayEntity extends TamableAnimal {
 		public void stop() {
 			// The animation flag is cleared by the entity's timer, not here, so the clip is not cut short.
 			this.bunnay.leapCooldown = LEAP_COOLDOWN;
+		}
+	}
+
+	/** The usual melee goal, except that with a weapon in each hand it may swing a little before the cooldown is up. */
+	private static final class BunnayMeleeGoal extends MeleeAttackGoal {
+		private final BunnayEntity bunnay;
+
+		BunnayMeleeGoal(BunnayEntity bunnay) {
+			super(bunnay, 1.3, true);
+			this.bunnay = bunnay;
+		}
+
+		@Override
+		protected boolean isTimeToAttack() {
+			int headStart = this.bunnay.isDualWielding() ? DUAL_WIELD_ATTACK_HEAD_START_TICKS : 0;
+			return this.getTicksUntilNextAttack() <= headStart;
 		}
 	}
 }

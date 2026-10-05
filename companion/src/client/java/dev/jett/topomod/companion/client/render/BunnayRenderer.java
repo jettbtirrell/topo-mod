@@ -9,6 +9,8 @@ import net.minecraft.client.renderer.entity.MobRenderer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 
 public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState, BunnayModel> {
 	public static final ModelLayerLocation LAYER = new ModelLayerLocation(CompanionMod.id("bunnay"), "main");
@@ -35,9 +37,11 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 		ArmedEntityRenderState.extractArmedEntityRenderState(entity, state, this.itemModelResolver, partialTicks);
 		state.readyProgress = entity.getReadyProgress(partialTicks);
 		state.eatProgress = entity.getEatProgress(partialTicks);
-		// The carrots in its off hand are only shown while it is eating them: it takes one out, eats, and puts it away.
-		if (state.eatProgress <= 0.0F) {
-			state.leftHandItemState.clear();
+		// While it eats, the carrot is in its left hand in place of whatever it holds there (the off hand weapon, if any),
+		// like a player switching to food; the weapon is back in hand as soon as the meal is done.
+		ItemStack eating = entity.getEatingFood();
+		if (state.eatProgress > 0.0F && !eating.isEmpty()) {
+			this.itemModelResolver.updateForLiving(state.leftHandItemState, eating, ItemDisplayContext.THIRD_PERSON_LEFT_HAND, entity);
 		}
 		state.bigHopAnimationState.copyFrom(entity.bigHopAnimationState);
 		state.idleAnimationState.copyFrom(entity.idleAnimationState);
