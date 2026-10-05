@@ -11,24 +11,30 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
-// The bunnay's equipment screen, laid out like the horse screen: its weapon slot on the left, player inventory below.
+// The bunnay's equipment screen, laid out like the horse screen: a weapon slot (its main hand) and a food slot (its off
+// hand, for the carrots it eats) on the left, player inventory below.
 public class BunnayMenu extends AbstractContainerMenu {
 	private static final int WEAPON_SLOT = 0;
-	private static final int INVENTORY_START = 1;
+	private static final int FOOD_SLOT = 1;
+	private static final int INVENTORY_START = 2;
 	private static final int HOTBAR_START = INVENTORY_START + 27;
 	private static final int SLOTS_END = HOTBAR_START + 9;
 
 	private final BunnayEntity bunnay;
-	private final Container equipment;
+	private final Container weapon;
+	private final Container food;
 
 	public BunnayMenu(int containerId, Inventory playerInventory, BunnayEntity bunnay) {
 		super(ModMenus.BUNNAY, containerId);
 		this.bunnay = bunnay;
-		// A view onto the bunnay's main hand, so changes in the menu are changes to the bunnay itself.
-		this.equipment = bunnay.createEquipmentSlotContainer(EquipmentSlot.MAINHAND);
-		this.equipment.startOpen(playerInventory.player);
+		// Views onto the bunnay's hands, so changes in the menu are changes to the bunnay itself.
+		this.weapon = bunnay.createEquipmentSlotContainer(EquipmentSlot.MAINHAND);
+		this.food = bunnay.createEquipmentSlotContainer(EquipmentSlot.OFFHAND);
+		this.weapon.startOpen(playerInventory.player);
+		this.food.startOpen(playerInventory.player);
 
-		this.addSlot(new WeaponSlot(this.equipment, 0, 8, 18));
+		this.addSlot(new WeaponSlot(this.weapon, 0, 8, 18));
+		this.addSlot(new FoodSlot(this.food, 0, 8, 36));
 		this.addStandardInventorySlots(playerInventory, 8, 84);
 	}
 
@@ -38,13 +44,14 @@ public class BunnayMenu extends AbstractContainerMenu {
 
 	@Override
 	public boolean stillValid(Player player) {
-		return this.bunnay.isAlive() && this.equipment.stillValid(player) && player.isWithinEntityInteractionRange(this.bunnay, 4.0);
+		return this.bunnay.isAlive() && this.weapon.stillValid(player) && player.isWithinEntityInteractionRange(this.bunnay, 4.0);
 	}
 
 	@Override
 	public void removed(Player player) {
 		super.removed(player);
-		this.equipment.stopOpen(player);
+		this.weapon.stopOpen(player);
+		this.food.stopOpen(player);
 	}
 
 	@Override
@@ -57,12 +64,16 @@ public class BunnayMenu extends AbstractContainerMenu {
 		ItemStack stack = slot.getItem();
 		ItemStack original = stack.copy();
 
-		if (slotIndex == WEAPON_SLOT) {
+		if (slotIndex == WEAPON_SLOT || slotIndex == FOOD_SLOT) {
 			if (!this.moveItemStackTo(stack, INVENTORY_START, SLOTS_END, true)) {
 				return ItemStack.EMPTY;
 			}
 		} else if (this.slots.get(WEAPON_SLOT).mayPlace(stack) && !this.slots.get(WEAPON_SLOT).hasItem()) {
 			if (!this.moveItemStackTo(stack, WEAPON_SLOT, WEAPON_SLOT + 1, false)) {
+				return ItemStack.EMPTY;
+			}
+		} else if (this.slots.get(FOOD_SLOT).mayPlace(stack)) {
+			if (!this.moveItemStackTo(stack, FOOD_SLOT, FOOD_SLOT + 1, false)) {
 				return ItemStack.EMPTY;
 			}
 		} else if (slotIndex < HOTBAR_START) {
@@ -95,6 +106,18 @@ public class BunnayMenu extends AbstractContainerMenu {
 		@Override
 		public int getMaxStackSize() {
 			return 1;
+		}
+	}
+
+	/** Holds a stack of carrots or golden carrots (not mixed); nothing else fits. */
+	private static final class FoodSlot extends Slot {
+		FoodSlot(Container container, int index, int x, int y) {
+			super(container, index, x, y);
+		}
+
+		@Override
+		public boolean mayPlace(ItemStack stack) {
+			return BunnayEntity.isCarrot(stack);
 		}
 	}
 }

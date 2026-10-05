@@ -34,6 +34,11 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 		super.extractRenderState(entity, state, partialTicks);
 		ArmedEntityRenderState.extractArmedEntityRenderState(entity, state, this.itemModelResolver, partialTicks);
 		state.readyProgress = entity.getReadyProgress(partialTicks);
+		state.eatProgress = entity.getEatProgress(partialTicks);
+		// The carrots in its off hand are only shown while it is eating them: it takes one out, eats, and puts it away.
+		if (state.eatProgress <= 0.0F) {
+			state.leftHandItemState.clear();
+		}
 		state.bigHopAnimationState.copyFrom(entity.bigHopAnimationState);
 		state.idleAnimationState.copyFrom(entity.idleAnimationState);
 		state.isDancing = entity.isDancing();

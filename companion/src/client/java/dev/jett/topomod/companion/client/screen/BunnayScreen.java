@@ -30,6 +30,8 @@ public class BunnayScreen extends AbstractContainerScreen<BunnayMenu> {
 		graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, left, top, 0.0F, 0.0F, this.imageWidth, this.imageHeight, 256, 256);
 		// Frame for the weapon slot (the horse texture only draws its own saddle and armor frames).
 		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SLOT_SPRITE, left + 7, top + 17, 18, 18);
+		// And the food slot under it.
+		graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SLOT_SPRITE, left + 7, top + 35, 18, 18);
 		InventoryScreen.extractEntityInInventoryFollowsMouse(
 			graphics, left + 26, top + 18, left + 78, top + 70, 30, 0.25F, this.xMouse, this.yMouse, this.menu.getBunnay()
 		);

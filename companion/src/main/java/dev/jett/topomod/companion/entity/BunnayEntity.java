@@ -7,6 +7,7 @@ import net.minecraft.core.Holder;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
 import net.minecraft.core.particles.BlockParticleOption;
+import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -143,6 +144,24 @@ public class BunnayEntity extends TamableAnimal {
 	 */
 	private static final int LEAP_MELEE_HOLD_TICKS = 4;
 
+	// Eating the carrots in its off hand to heal.
+	/** How long one carrot takes to eat, in ticks (the same as a player's). */
+	private static final int EAT_TICKS = 32;
+	/** It starts eating when it is missing at least this much health (1 heart), so a golden carrot is not wasted on a scratch... */
+	private static final float EAT_MIN_MISSING_HEALTH = 2.0F;
+	/** ...but once it has started it keeps going, carrot after carrot, until it is missing less than this (about healed). */
+	private static final float EAT_KEEP_GOING_MISSING_HEALTH = 0.5F;
+	/** Pause after finishing (or being interrupted) before it starts on the next carrot. */
+	private static final int EAT_COOLDOWN_TICKS = 40;
+	/** It will not eat until this many ticks have passed since it was last hurt by a mob, so it is out of the fight (5 seconds). */
+	private static final int EAT_SAFE_TICKS = 100;
+	/** How fast the eating pose eases in and out, per tick. */
+	private static final float EAT_RISE = 0.2F;
+	private static final float EAT_FALL = 0.15F;
+
+	/** Synced so the client can show the eating pose. */
+	private static final EntityDataAccessor<Boolean> DATA_EATING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
+
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	/** How many ticks the current hop spends in the air; the client stretches the animation's mid-air part to match. */
@@ -158,6 +177,12 @@ public class BunnayEntity extends TamableAnimal {
 	/** 0 to 1, client side: how far into the ready stance (weapon raised, closing on a target) it is. */
 	private float readyProgress;
 	private float readyProgressO;
+	/** 0 to 1, client side: how far into the eating pose it is. */
+	private float eatProgress;
+	private float eatProgressO;
+	/** Server side: ticks into the carrot being eaten, and the wait before the next one. */
+	private int eatTicks;
+	private int eatCooldown;
 
 	// Dancing to a jukebox, the way the allay does: it listens for the jukebox game events, remembers which jukebox
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
@@ -179,8 +204,98 @@ public class BunnayEntity extends TamableAnimal {
 	protected void defineSynchedData(SynchedEntityData.Builder entityData) {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_BIG_HOPPING, false);
+		entityData.define(DATA_EATING, false);
 		entityData.define(DATA_HOP_AIR_TICKS, BIG_HOP_AIR_TICKS);
 		entityData.define(DATA_DANCING, false);
+	}
+
+	public boolean isEating() {
+		return this.entityData.get(DATA_EATING);
+	}
+
+	/** How far into the eating pose it is, for the renderer, smoothed between ticks. */
+	public float getEatProgress(float partialTick) {
+		return Mth.lerp(partialTick, this.eatProgressO, this.eatProgress);
+	}
+
+	/** Anything it puts in either hand is dropped for sure when it dies, however it got there (the screen, a click). */
+	@Override
+	public void setItemSlot(EquipmentSlot slot, ItemStack stack) {
+		super.setItemSlot(slot, stack);
+		if (!this.level().isClientSide() && !stack.isEmpty() && (slot == EquipmentSlot.MAINHAND || slot == EquipmentSlot.OFFHAND)) {
+			this.setGuaranteedDrop(slot);
+		}
+	}
+
+	/**
+	 * Out of the fight, hurt enough to want a carrot, and standing around: not fighting, dancing, hopping or in water.
+	 * Once it is already eating, how hurt it has to be is lower (see EAT_KEEP_GOING_MISSING_HEALTH), so it finishes the job.
+	 */
+	private boolean canEat(boolean alreadyEating) {
+		LivingEntity target = this.getTarget();
+		return (target == null || !target.isAlive())
+			&& this.hurtTime == 0
+			&& this.tickCount - this.getLastHurtByMobTimestamp() > EAT_SAFE_TICKS
+			&& this.getMaxHealth() - this.getHealth() >= (alreadyEating ? EAT_KEEP_GOING_MISSING_HEALTH : EAT_MIN_MISSING_HEALTH)
+			&& this.onGround()
+			&& !this.isInWater()
+			&& !this.isBigHopping()
+			&& !this.isDancing()
+			&& !this.isPassenger();
+	}
+
+	/** Starts, plays and finishes eating the carrot in its off hand. The server decides; the client just shows the pose. */
+	private void tickEating() {
+		ItemStack food = this.getOffhandItem();
+		if (this.isEating()) {
+			if (!this.canEat(true) || !isCarrot(food)) {
+				this.stopEating();
+				return;
+			}
+			this.eatTicks++;
+			// It stands still to eat (a sitting bunnay already is).
+			if (!this.isInSittingPose()) {
+				this.getNavigation().stop();
+			}
+			if (this.eatTicks % 4 == 0 && this.eatTicks < EAT_TICKS) {
+				this.eatEffects(food, 3);
+			}
+			if (this.eatTicks >= EAT_TICKS) {
+				this.heal(healAmount(food));
+				food.shrink(1);
+				if (food.isEmpty()) {
+					this.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+				}
+				this.eatEffects(food.isEmpty() ? new ItemStack(Items.CARROT) : food, 8);
+				// Straight on to the next one, with the carrot still in its hand, until it is healed or out of carrots.
+				if (isCarrot(this.getOffhandItem()) && this.canEat(true)) {
+					this.eatTicks = 0;
+				} else {
+					this.stopEating();
+				}
+			}
+		} else if (this.eatCooldown > 0) {
+			this.eatCooldown--;
+		} else if (isCarrot(food) && this.canEat(false)) {
+			this.eatTicks = 0;
+			this.entityData.set(DATA_EATING, true);
+		}
+	}
+
+	private void stopEating() {
+		this.entityData.set(DATA_EATING, false);
+		this.eatTicks = 0;
+		this.eatCooldown = EAT_COOLDOWN_TICKS;
+	}
+
+	/** The crunch and a few crumbs of the food, in front of its mouth. */
+	private void eatEffects(ItemStack food, int crumbs) {
+		this.playSound(SoundEvents.GENERIC_EAT.value(), 0.5F, 1.0F + (this.random.nextFloat() - this.random.nextFloat()) * 0.2F);
+		if (this.level() instanceof ServerLevel server) {
+			Vec3 look = this.getViewVector(1.0F);
+			server.sendParticles(new ItemParticleOption(ParticleTypes.ITEM, food.getItem()),
+				this.getX() + look.x * 0.3, this.getY() + this.getEyeHeight() * 0.7, this.getZ() + look.z * 0.3, crumbs, 0.05, 0.05, 0.05, 0.05);
+		}
 	}
 
 	public boolean isHoldingBamboo() {
@@ -286,6 +401,9 @@ public class BunnayEntity extends TamableAnimal {
 	@Override
 	public void aiStep() {
 		super.aiStep();
+		if (!this.level().isClientSide()) {
+			this.tickEating();
+		}
 		if (!this.level().isClientSide() && this.isDancing() && this.shouldStopDancing() && this.tickCount % 20 == 0) {
 			this.jukeboxPos = null;
 			this.setDancing(false);
@@ -366,6 +484,8 @@ public class BunnayEntity extends TamableAnimal {
 			this.readyProgressO = this.readyProgress;
 			boolean ready = this.isAggressive() && this.isHoldingBamboo();
 			this.readyProgress = Mth.clamp(this.readyProgress + (ready ? READY_RISE : -READY_FALL), 0.0F, 1.0F);
+			this.eatProgressO = this.eatProgress;
+			this.eatProgress = Mth.clamp(this.eatProgress + (this.isEating() ? EAT_RISE : -EAT_FALL), 0.0F, 1.0F);
 		} else {
 			if (this.bigHopCooldown > 0) {
 				this.bigHopCooldown--;
@@ -440,6 +560,11 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	public boolean isFood(ItemStack stack) {
+		return isCarrot(stack);
+	}
+
+	/** A carrot or golden carrot: what it is tamed, healed and fed with, and what its food slot holds. */
+	public static boolean isCarrot(ItemStack stack) {
 		return stack.is(Items.CARROT) || stack.is(Items.GOLDEN_CARROT);
 	}
 
@@ -486,13 +611,27 @@ public class BunnayEntity extends TamableAnimal {
 				return InteractionResult.SUCCESS;
 			}
 
-			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more. At full health the carrot is left
-			// alone, so you can still eat it.
+			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more. At full health the carrot goes into
+			// its off hand instead, one at a time, for it to eat later when it is hurt.
 			if (this.isFood(stack)) {
 				if (this.getHealth() < this.getMaxHealth()) {
 					if (!this.level().isClientSide()) {
 						this.heal(healAmount(stack));
 						stack.consume(1, player);
+					}
+					return InteractionResult.SUCCESS;
+				}
+				ItemStack held = this.getOffhandItem();
+				if (held.isEmpty() || (ItemStack.isSameItemSameComponents(held, stack) && held.getCount() < held.getMaxStackSize())) {
+					if (!this.level().isClientSide()) {
+						ItemStack one = stack.copyWithCount(1);
+						stack.consume(1, player);
+						if (held.isEmpty()) {
+							this.setItemSlot(EquipmentSlot.OFFHAND, one);
+						} else {
+							held.grow(1);
+						}
+						this.setPersistenceRequired();
 					}
 					return InteractionResult.SUCCESS;
 				}

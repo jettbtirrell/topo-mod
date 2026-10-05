@@ -16,4 +16,6 @@ public class BunnayRenderState extends ArmedEntityRenderState {
 	public int hopAirTicks = 15;
 	/** 0 to 1: how far into the ready stance (weapon raised, closing on a target) it is; eased by the entity. */
 	public float readyProgress;
+	/** 0 to 1: how far into the eating pose (a carrot raised to its mouth) it is; eased by the entity. */
+	public float eatProgress;
 }

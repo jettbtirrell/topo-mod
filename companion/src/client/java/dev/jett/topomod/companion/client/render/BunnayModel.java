@@ -126,6 +126,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		}
 
 		this.animateCombat(state);
+		this.animateEating(state);
 
 		// Keyframed clips go on last: they are offsets from the pose above.
 		this.idleAnimation.apply(state.idleAnimationState, state.ageInTicks);
@@ -253,6 +254,24 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	private static float smoothstep(float x) {
 		float clamped = Mth.clamp(x, 0.0F, 1.0F);
 		return clamped * clamped * (3.0F - 2.0F * clamped);
+	}
+
+	/** The off hand in the eating pose: raised forward and turned in, so the carrot in it is at the mouth. */
+	private static final float EAT_ARM_PITCH = -1.45F;
+	private static final float EAT_ARM_YAW = 0.5F;
+
+	/**
+	 * Eating: the left hand (the off hand, which holds the carrot) comes up to the mouth and the head bobs, chewing.
+	 * Eased in and out by the entity. It only happens out of combat, so it does not meet the weapon arm's poses.
+	 */
+	private void animateEating(BunnayRenderState state) {
+		float eat = state.eatProgress;
+		if (eat <= 0.0F) {
+			return;
+		}
+		this.leftArm.xRot = Mth.lerp(eat, this.leftArm.xRot, EAT_ARM_PITCH);
+		this.leftArm.yRot = Mth.lerp(eat, this.leftArm.yRot, EAT_ARM_YAW);
+		this.head.xRot += Mth.sin(state.ageInTicks * 1.3F) * 0.1F * eat;
 	}
 
 	/**
