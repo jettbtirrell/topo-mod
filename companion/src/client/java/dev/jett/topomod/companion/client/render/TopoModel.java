@@ -119,7 +119,7 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 
 		boolean dancing = state.danceTime >= 0.0F && !state.sitting;
 		if (dancing) {
-			this.animateDance(state.danceTime);
+			this.animateDance(state.danceTime, state.holdingItem);
 		} else if (state.sitting) {
 			// Plop down: the body, head and arms drop 2px so the bottom rests on the ground.
 			for (ModelPart part : new ModelPart[]{this.body, this.head, this.leftArm, this.rightArm}) {
@@ -160,8 +160,11 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 		this.rightArm.zRot = -HOLD_INWARD;
 	}
 
-	/** Victory dance: spins twice while hopping, arms up, ears and tail flapping. */
-	private void animateDance(float t) {
+	/**
+	 * Victory dance: spins twice while hopping, with ears and tail flapping. The arms stick out to the
+	 * sides and wiggle up and down, or stay in front holding the item if there is one.
+	 */
+	private void animateDance(float t, boolean holdingItem) {
 		float length = TopoEntity.DANCE_LENGTH;
 		// Ease the motion in and out so it doesn't snap at the start or end.
 		float amp = Mth.clamp(Math.min(t, length - t) / 6.0F, 0.0F, 1.0F);
@@ -170,13 +173,17 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 		this.root.yRot = Mth.TWO_PI * 2.0F * (t / length);
 		this.root.y -= Math.abs(Mth.sin(t * 0.35F)) * 2.5F * amp;
 
-		float wave = Mth.sin(t * 0.45F) * 0.3F * amp;
-		this.leftArm.xRot = -2.9F + wave;
-		this.rightArm.xRot = -2.9F - wave;
-		this.leftArm.zRot = -0.3F;
-		this.rightArm.zRot = 0.3F;
+		if (holdingItem) {
+			this.poseArmsHolding();
+		} else {
+			// -PI/2 is straight out to the side. Centered a little below that with a smaller swing upward,
+			// so the shoulders never lift an arm into the (wide) head sitting just above them.
+			float flap = -1.35F + Mth.sin(t * 0.7F) * 0.5F * amp;
+			this.leftArm.zRot = flap;
+			this.rightArm.zRot = -flap;
+		}
 
-		this.head.zRot = Mth.sin(t * 0.4F) * 0.18F * amp;
+		this.head.zRot = Mth.sin(t * 0.4F) * 0.12F * amp;
 		this.head.xRot = -0.15F + Mth.sin(t * 0.7F) * 0.08F * amp;
 		this.leftEar.zRot += Mth.sin(t * 0.55F) * 0.2F * amp;
 		this.rightEar.zRot += Mth.sin(t * 0.55F) * 0.2F * amp;
