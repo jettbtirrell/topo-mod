@@ -145,12 +145,30 @@ public final class BunnayAnimation {
 		return new Keyframe(time, KeyframeAnimations.degreeVec(x, 0.0F, z), AnimationChannel.Interpolations.LINEAR);
 	}
 
-	/** The arm keyframes for one side; side is -1 for the left arm and 1 for the right, which flares the opposite way. */
-	/** The arm keyframes for one side; side is -1 for the left arm and 1 for the right, which flares the opposite way. */
+	/**
+	 * How far each arm is turned outward, in degrees, while the arms are up in the air. Up there they point nearly straight
+	 * forward, so they are parallel, and a weapon held in each (flipped into a reverse grip) would cross the other's; this
+	 * angles them apart. It is a turn about the vertical, since the flare (a turn about the arm's own long axis when it
+	 * points forward) does nothing to the direction an arm points at that moment.
+	 */
+	private static final float HOP_ARM_SPREAD_DEGREES = 15.0F;
+	/**
+	 * How far each arm is rolled about its own long axis while up in the air, in degrees: positive rolls the top of a held
+	 * weapon toward the middle (the old flare, 25, made the two weapons meet at the top), negative rolls it outward. A
+	 * small negative roll keeps the tops apart; as a side effect the lower part of each arm angles a little down and in.
+	 */
+	private static final float HOP_ARM_ROLL_DEGREES = -10.0F;
+
+	/**
+	 * The arm keyframes for one side; side is -1 for the left arm and 1 for the right. The right arm turns outward with a
+	 * positive y rotation and the left with a negative one, so the spread is the same number times side, as is the flare.
+	 */
 	private static Keyframe[] armSwing(float side) {
+		float spread = HOP_ARM_SPREAD_DEGREES * side;
+		float roll = HOP_ARM_ROLL_DEGREES * side;
 		return new Keyframe[]{
-			rot(0.00F, 0.0F, 0.0F, 0.0F), rot(0.17F, 40.0F, 0.0F, 0.0F), rot(0.25F, -95.0F, 0.0F, 25.0F * side),
-			rot(0.60F, -110.0F, 0.0F, 25.0F * side), rot(0.90F, -70.0F, 0.0F, 25.0F * side), rot(1.00F, 25.0F, 0.0F, 0.0F),
+			rot(0.00F, 0.0F, 0.0F, 0.0F), rot(0.17F, 40.0F, 0.0F, 0.0F), rot(0.25F, -95.0F, spread, roll),
+			rot(0.60F, -110.0F, spread, roll), rot(0.90F, -70.0F, spread, roll), rot(1.00F, 25.0F, 0.0F, 0.0F),
 			rot(1.15F, 10.0F, 0.0F, 0.0F), rot(1.30F, 0.0F, 0.0F, 0.0F)
 		};
 	}

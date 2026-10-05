@@ -194,6 +194,7 @@ public class BunnayEntity extends TamableAnimal {
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
 	private int bigHopCooldown;
+	private boolean forceBigHop;
 	private int leapCooldown;
 	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
 	private int bigHopAnimationTicks;
@@ -496,6 +497,11 @@ public class BunnayEntity extends TamableAnimal {
 
 	}
 
+	// DEBUG: used by TopoDebugCommand to preview the big hop. Remove together with that command.
+	public void debugBigHop() {
+		this.forceBigHop = true;
+	}
+
 	public boolean isBigHopping() {
 		return this.entityData.get(DATA_BIG_HOPPING);
 	}
@@ -773,6 +779,9 @@ public class BunnayEntity extends TamableAnimal {
 			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
 				return false;
 			}
+			if (this.bunnay.forceBigHop) {
+				return true;
+			}
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.bigHopCooldown <= 0
 				&& (target == null || !target.isAlive())
@@ -798,6 +807,7 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.ticks = 0;
+			this.bunnay.forceBigHop = false;
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 		}
