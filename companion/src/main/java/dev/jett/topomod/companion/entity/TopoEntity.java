@@ -67,6 +67,10 @@ public class TopoEntity extends TamableAnimal {
 	 */
 	private int danceElapsed;
 
+	/** The last mob this topo hit, and when to stop caring about it (server only). */
+	private @Nullable LivingEntity lastVictim;
+	private int lastVictimExpiresAt;
+
 	public TopoEntity(EntityType<? extends TopoEntity> type, Level level) {
 		super(type, level);
 	}
@@ -104,6 +108,26 @@ public class TopoEntity extends TamableAnimal {
 	@Override
 	public void aiStep() {
 		super.aiStep();
+
+		if (!this.level().isClientSide() && this.lastVictim != null) {
+			// Dance when something the topo hit has died. This is checked directly, not via kill credit,
+			// because credit goes to the player first if they also hit the mob, and burning deaths have none.
+			if (!this.lastVictim.isAlive()) {
+				this.lastVictim = null;
+				this.startDance();
+			} else if (this.tickCount > this.lastVictimExpiresAt) {
+				this.lastVictim = null;
+			}
+		}
+
+		// Straight back to work if there is another enemy to fight.
+		if (!this.level().isClientSide() && this.isDancing()) {
+			LivingEntity target = this.getTarget();
+			if (target != null && target.isAlive()) {
+				this.entityData.set(DATA_DANCING, false);
+			}
+		}
+
 		if (this.isDancing()) {
 			this.danceElapsed++;
 			if (!this.level().isClientSide() && this.danceElapsed >= DANCE_LENGTH) {
@@ -135,6 +159,11 @@ public class TopoEntity extends TamableAnimal {
 	@Override
 	public boolean doHurtTarget(ServerLevel level, Entity target) {
 		boolean hit = super.doHurtTarget(level, target);
+		if (hit && target instanceof LivingEntity victim) {
+			this.lastVictim = victim;
+			// Long enough for a burning mob to die after the last hit.
+			this.lastVictimExpiresAt = this.tickCount + 200;
+		}
 		if (hit && this.isHoldingTorch()) {
 			target.igniteForTicks(TORCH_FIRE_TICKS);
 		}
