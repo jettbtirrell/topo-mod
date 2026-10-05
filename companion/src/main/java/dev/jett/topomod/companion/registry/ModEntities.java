@@ -19,8 +19,8 @@ public final class ModEntities {
 		BuiltInRegistries.ENTITY_TYPE,
 		TOPO_KEY,
 		EntityType.Builder.of(TopoEntity::new, MobCategory.CREATURE)
-			.sized(0.4F, 0.4F)
-			.eyeHeight(0.3F)
+			.sized(0.5F, 0.85F)
+			.eyeHeight(0.7F)
 			.clientTrackingRange(8)
 			.build(TOPO_KEY)
 	);

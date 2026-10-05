@@ -13,7 +13,7 @@ public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoM
 	private static final Identifier TEXTURE = CompanionMod.id("textures/entity/topo/topo.png");
 
 	public TopoRenderer(EntityRendererProvider.Context context) {
-		super(context, new TopoModel(context.bakeLayer(LAYER)), 0.2F);
+		super(context, new TopoModel(context.bakeLayer(LAYER)), 0.3F);
 	}
 
 	@Override
