@@ -86,8 +86,10 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int BIG_HOP_TAKEOFF_TICK = 4;
 	/** Upward speed at takeoff; 0.55 gives about 2 blocks of height and 15 ticks in the air. */
 	private static final double BIG_HOP_LAUNCH_SPEED = 0.55;
-	/** Forward speed at takeoff, which carries it about 1.7 blocks (see LEAP_BLOCKS_PER_SPEED: about 5.5 blocks per point of speed). */
-	private static final double BIG_HOP_FORWARD_SPEED = 0.30;
+	/** Ticks spent in the air by the ordinary big hop (the time a 0.55 launch takes to come back down), which the animation is timed to. */
+	private static final int BIG_HOP_AIR_TICKS = 15;
+	/** Forward speed at takeoff, which carries it about 2.5 blocks: about 5.45 blocks per point of speed (see blocksPerSpeed). */
+	private static final double BIG_HOP_FORWARD_SPEED = 0.45;
 	/** A walking bunnay starts a big hop with a 1-in-this chance each time its goals are checked (about every 6 seconds). */
 	private static final int BIG_HOP_ODDS = 40;
 	/** Minimum ticks between big hops. */
@@ -106,7 +108,7 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float READY_FALL = 0.15F;
 
 	// The leap attack: from a distance, it can spring at its target with the same crouch and big hop animation, landing
-	// close to it. It reuses BIG_HOP_TICKS, BIG_HOP_TAKEOFF_TICK and BIG_HOP_LAUNCH_SPEED, so the clip still lines up.
+	// close to it. The clip is stretched to fit its time in the air (see BunnayModel.clipMillis).
 	/** The target has to be at least this far away (in blocks, along the ground) for a leap to be worth it, and no further than the max. */
 	private static final double LEAP_MIN_DISTANCE = 5.0;
 	private static final double LEAP_MAX_DISTANCE = 11.0;
@@ -117,11 +119,17 @@ public class BunnayEntity extends TamableAnimal {
 	/** How far short of the target it aims to land, in blocks, so it does not run into it. */
 	private static final double LEAP_STOP_SHORT = 1.0;
 	/**
-	 * Blocks covered by the time it lands, per point of forward launch speed. The speed is cut to 0.546 of itself on the
-	 * launch tick (the friction of the block it is leaving), then to 0.91 of itself every tick in the air, over the 15 ticks
-	 * of the jump: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ... for 14 ticks) is about 5.5.
+	 * A leap goes as high as it can: it tries launch speeds from the highest down in steps, and takes the first whose whole
+	 * arc is clear of the ceiling (see arcClear). 0.85 reaches about 4.4 blocks in 22 ticks; 0.55 is the ordinary big hop's
+	 * 2 blocks. Whatever the height, the forward speed is worked out from the time in the air so it lands in the same spot.
 	 */
-	private static final double LEAP_BLOCKS_PER_SPEED = 5.5;
+	private static final double LEAP_MAX_LAUNCH_SPEED = 0.85;
+	private static final double LEAP_MIN_LAUNCH_SPEED = BIG_HOP_LAUNCH_SPEED;
+	private static final double LEAP_LAUNCH_SPEED_STEP = 0.05;
+	/** Ticks after landing that the animation's squash and recovery take. */
+	private static final int LEAP_RECOVERY_TICKS = 7;
+	/** The arc is only checked for the ceiling above this height over the ground; below it, the ground itself is in the way. */
+	private static final double LEAP_ARC_GROUND_MARGIN = 0.6;
 	/** Fast enough to cover the longest leap: (11 - 1) / 5.5 is about 1.8. */
 	private static final double LEAP_MAX_SPEED = 1.8;
 	/** Landing from a leap hits its target, and any monster within this many blocks, for this much damage and a shove. */
@@ -136,6 +144,9 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int LEAP_MELEE_HOLD_TICKS = 4;
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
+
+	/** How many ticks the current hop spends in the air; the client stretches the animation's mid-air part to match. */
+	private static final EntityDataAccessor<Integer> DATA_HOP_AIR_TICKS = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.INT);
 
 	private static final EntityDataAccessor<Boolean> DATA_BIG_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -168,6 +179,7 @@ public class BunnayEntity extends TamableAnimal {
 	protected void defineSynchedData(SynchedEntityData.Builder entityData) {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_BIG_HOPPING, false);
+		entityData.define(DATA_HOP_AIR_TICKS, BIG_HOP_AIR_TICKS);
 		entityData.define(DATA_DANCING, false);
 	}
 
@@ -279,6 +291,66 @@ public class BunnayEntity extends TamableAnimal {
 			this.setDancing(false);
 		}
 
+	}
+
+	public int getHopAirTicks() {
+		return this.entityData.get(DATA_HOP_AIR_TICKS);
+	}
+
+	/**
+	 * Ticks a jump launched upward at this speed spends in the air, from the same motion rules the game uses: it moves by
+	 * its vertical speed, then loses 0.08 to gravity and 2% to drag. Counted until it is back down where it started.
+	 */
+	private static int airTicks(double launchSpeed) {
+		double height = 0.0;
+		double speed = launchSpeed;
+		int ticks = 0;
+		do {
+			height += speed;
+			speed = (speed - 0.08) * 0.98;
+			ticks++;
+		} while (height > 0.0 && ticks < 200);
+		return ticks;
+	}
+
+	/**
+	 * How far a jump with this many ticks in the air carries it, per point of forward launch speed, by the time it lands.
+	 * The forward speed is cut to 0.546 of itself on the launch tick (the friction of the block it is leaving), then to
+	 * 0.91 of itself every tick in the air: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ...). That is 5.45 for 15 ticks, about 6.3 for 23.
+	 */
+	private static double blocksPerSpeed(int airTicks) {
+		double total = 1.0;
+		double speed = 0.546;
+		for (int tick = 1; tick < airTicks; tick++) {
+			total += speed;
+			speed *= 0.91;
+		}
+		return total;
+	}
+
+	/**
+	 * Whether the arc of a jump with this launch speed, forward speed and direction is free of blocks, so it will not hit a
+	 * ceiling. This walks the same motion the jump will follow, one tick at a time, and checks the bunnay's box at each
+	 * point (above the ground margin, so the ground it is leaving and landing on does not count).
+	 */
+	private boolean arcClear(double launchSpeed, double forwardSpeed, double dirX, double dirZ, int airTicks) {
+		double x = this.getX();
+		double y = this.getY();
+		double z = this.getZ();
+		double rise = launchSpeed;
+		double forward = forwardSpeed;
+		double startY = y;
+		for (int tick = 0; tick < airTicks; tick++) {
+			x += dirX * forward;
+			z += dirZ * forward;
+			y += rise;
+			rise = (rise - 0.08) * 0.98;
+			forward *= tick == 0 ? 0.546 : 0.91;
+			if (y > startY + LEAP_ARC_GROUND_MARGIN && !this.level().noCollision(this.getDimensions(this.getPose()).makeBoundingBox(x, y, z))) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public boolean isBigHopping() {
@@ -564,6 +636,7 @@ public class BunnayEntity extends TamableAnimal {
 		public void start() {
 			this.ticks = 0;
 			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_HOP_AIR_TICKS, BIG_HOP_AIR_TICKS);
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 		}
 
@@ -657,6 +730,10 @@ public class BunnayEntity extends TamableAnimal {
 		private final BunnayEntity bunnay;
 		private int ticks;
 		private boolean impacted;
+		/** Chosen when the leap starts: how fast it launches upward, how long that keeps it in the air, and how long the whole leap lasts. */
+		private double launchSpeed = LEAP_MIN_LAUNCH_SPEED;
+		private int airTicks = BIG_HOP_AIR_TICKS;
+		private int totalTicks = BIG_HOP_TICKS;
 
 		LeapGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -685,7 +762,7 @@ public class BunnayEntity extends TamableAnimal {
 		public boolean canContinueToUse() {
 			// Done on landing, so the chase starts again at once; the animation's squash and recovery play out by themselves.
 			boolean landed = this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
-			return this.ticks < BIG_HOP_TICKS && !landed;
+			return this.ticks < this.totalTicks && !landed;
 		}
 
 		@Override
@@ -702,9 +779,36 @@ public class BunnayEntity extends TamableAnimal {
 		public void start() {
 			this.ticks = 0;
 			this.impacted = false;
+			this.chooseHeight();
 			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_HOP_AIR_TICKS, this.airTicks);
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
-			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
+			this.bunnay.bigHopAnimationTicks = this.totalTicks;
+		}
+
+		/**
+		 * Picks the highest launch speed whose arc to the target is clear of the ceiling, trying from the highest down.
+		 * If none is clear it uses the lowest, the ordinary big hop's, which is the best it can do.
+		 */
+		private void chooseHeight() {
+			this.launchSpeed = LEAP_MIN_LAUNCH_SPEED;
+			this.airTicks = BIG_HOP_AIR_TICKS;
+			LivingEntity target = this.bunnay.getTarget();
+			if (target != null) {
+				double dx = target.getX() - this.bunnay.getX();
+				double dz = target.getZ() - this.bunnay.getZ();
+				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
+				for (double candidate = LEAP_MAX_LAUNCH_SPEED; candidate > LEAP_MIN_LAUNCH_SPEED + 1.0E-6; candidate -= LEAP_LAUNCH_SPEED_STEP) {
+					int air = airTicks(candidate);
+					double speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / blocksPerSpeed(air), LEAP_MAX_SPEED);
+					if (this.bunnay.arcClear(candidate, speed, dx / distance, dz / distance, air)) {
+						this.launchSpeed = candidate;
+						this.airTicks = air;
+						break;
+					}
+				}
+			}
+			this.totalTicks = BIG_HOP_TAKEOFF_TICK + this.airTicks + LEAP_RECOVERY_TICKS;
 		}
 
 		@Override
@@ -728,7 +832,7 @@ public class BunnayEntity extends TamableAnimal {
 				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
 				forwardX = dx / distance;
 				forwardZ = dz / distance;
-				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
+				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / blocksPerSpeed(this.airTicks), LEAP_MAX_SPEED);
 				// Face the way it is going, so it does not leap sideways.
 				float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
 				this.bunnay.setYRot(yaw);
@@ -741,7 +845,7 @@ public class BunnayEntity extends TamableAnimal {
 				forwardZ = Math.cos(yaw);
 				speed = BIG_HOP_FORWARD_SPEED;
 			}
-			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, BIG_HOP_LAUNCH_SPEED, forwardZ * speed));
+			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, this.launchSpeed, forwardZ * speed));
 			this.bunnay.needsSync = true;
 			this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
 		}

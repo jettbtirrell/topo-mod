@@ -12,6 +12,8 @@ public class BunnayRenderState extends ArmedEntityRenderState {
 	public boolean isDancing;
 	/** True while it is sitting down (ordered to sit). */
 	public boolean isSitting;
+	/** How many ticks the current hop is in the air; the model stretches the hop clip to match. */
+	public int hopAirTicks = 15;
 	/** 0 to 1: how far into the ready stance (weapon raised, closing on a target) it is; eased by the entity. */
 	public float readyProgress;
 }
