@@ -130,9 +130,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 
 		// Keyframed clips go on last: they are offsets from the pose above.
 		this.idleAnimation.apply(state.idleAnimationState, state.ageInTicks);
-		if (state.bigHopAnimationState.isStarted()) {
-			this.bigHopAnimation.apply(clipMillis(state), 1.0F);
-		}
+		this.bigHopAnimation.apply(state.bigHopAnimationState, state.ageInTicks);
 	}
 
 	/**
@@ -214,7 +212,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		if (!state.bigHopAnimationState.isStarted()) {
 			return 0.0F;
 		}
-		float t = clipMillis(state) / 1000.0F;
+		float t = state.bigHopAnimationState.getTimeInMillis(state.ageInTicks) / 1000.0F;
 		if (t <= SPIN_OUT_START || t >= SPIN_BACK_END) {
 			return 0.0F;
 		}
@@ -225,30 +223,6 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 			return REVERSE_GRIP_DEGREES;
 		}
 		return REVERSE_GRIP_DEGREES * (1.0F - smoothstep((t - SPIN_BACK_START) / (SPIN_BACK_END - SPIN_BACK_START)));
-	}
-
-	/** When the hop clip's takeoff happens (tick 4 of the hop) and where its landing is, in seconds into the clip. */
-	private static final float CLIP_TAKEOFF = 0.2F;
-	private static final float CLIP_LANDING = 0.95F;
-
-	/**
-	 * Where the hop clip is, in milliseconds, for the time the hop has really been playing. The clip is made for a hop with
-	 * 15 ticks in the air (0.75 seconds, from takeoff at 0.2 to landing at 0.95); a higher hop is in the air longer, so the
-	 * part of the clip between takeoff and landing is stretched to fit, and the crouch before and the landing after play at
-	 * normal speed. For a 15 tick hop this changes nothing.
-	 */
-	private static long clipMillis(BunnayRenderState state) {
-		float real = state.bigHopAnimationState.getTimeInMillis(state.ageInTicks) / 1000.0F;
-		float air = state.hopAirTicks / 20.0F;
-		float clip;
-		if (real <= CLIP_TAKEOFF) {
-			clip = real;
-		} else if (real <= CLIP_TAKEOFF + air) {
-			clip = CLIP_TAKEOFF + (real - CLIP_TAKEOFF) * (CLIP_LANDING - CLIP_TAKEOFF) / air;
-		} else {
-			clip = CLIP_LANDING + (real - CLIP_TAKEOFF - air);
-		}
-		return (long) (clip * 1000.0F);
 	}
 
 	private static float smoothstep(float x) {

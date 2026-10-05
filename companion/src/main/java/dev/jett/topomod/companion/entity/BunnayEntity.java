@@ -6,7 +6,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
-import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
@@ -49,7 +48,6 @@ import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
-import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.damagesource.DamageSource;
@@ -61,7 +59,6 @@ import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.BunnayMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.DynamicGameEventListener;
 import net.minecraft.world.level.gameevent.EntityPositionSource;
 import net.minecraft.world.level.gameevent.GameEvent;
@@ -87,9 +84,7 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int BIG_HOP_TAKEOFF_TICK = 4;
 	/** Upward speed at takeoff; 0.55 gives about 2 blocks of height and 15 ticks in the air. */
 	private static final double BIG_HOP_LAUNCH_SPEED = 0.55;
-	/** Ticks spent in the air by the ordinary big hop (the time a 0.55 launch takes to come back down), which the animation is timed to. */
-	private static final int BIG_HOP_AIR_TICKS = 15;
-	/** Forward speed at takeoff, which carries it about 2.5 blocks: about 5.45 blocks per point of speed (see blocksPerSpeed). */
+	/** Forward speed at takeoff, which carries it about 2.5 blocks: about 5.45 blocks per point of speed (see LEAP_BLOCKS_PER_SPEED). */
 	private static final double BIG_HOP_FORWARD_SPEED = 0.45;
 	/** A walking bunnay starts a big hop with a 1-in-this chance each time its goals are checked (about every 6 seconds). */
 	private static final int BIG_HOP_ODDS = 40;
@@ -101,15 +96,20 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int IDLE_MIN_TICKS = 180;
 	private static final int IDLE_EXTRA_TICKS = 40;
 
-	// Fighting with a bamboo: it holds it in its right hand, and each hit does a little extra damage.
+	// Fighting with something in its right hand: each hit does a little extra damage. A bamboo is plain extra damage;
+	// a breeze rod does less, but every hit also blasts the foe the way a wind charge would.
 	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
-	private static final Identifier BAMBOO_DAMAGE_ID = CompanionMod.id("bamboo_damage");
+	private static final double BREEZE_ROD_BONUS_DAMAGE = 1.0;
+	private static final Identifier WEAPON_DAMAGE_ID = CompanionMod.id("weapon_damage");
+	/** The wind burst's shove on a foe: this fast away from the bunnay, and this fast straight up (0.9 is about 4 blocks of height). */
+	private static final double WIND_BURST_HORIZONTAL = 0.5;
+	private static final double WIND_BURST_VERTICAL = 0.9;
 	/** How fast the ready stance eases in and out, per tick (it takes 4 ticks to raise and about 7 to lower). */
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
 
-	// The leap attack: from a distance, it can spring at its target with the same crouch and big hop animation, landing
-	// close to it. The clip is stretched to fit its time in the air (see BunnayModel.clipMillis).
+	// The leap: from a distance, it can spring at its target with the same crouch and big hop animation, to close the gap.
+	// It is only a way of getting there; the landing does no damage of its own.
 	/** The target has to be at least this far away (in blocks, along the ground) for a leap to be worth it, and no further than the max. */
 	private static final double LEAP_MIN_DISTANCE = 5.0;
 	private static final double LEAP_MAX_DISTANCE = 11.0;
@@ -120,29 +120,13 @@ public class BunnayEntity extends TamableAnimal {
 	/** How far short of the target it aims to land, in blocks, so it does not run into it. */
 	private static final double LEAP_STOP_SHORT = 1.0;
 	/**
-	 * A leap goes as high as it can: it tries launch speeds from the highest down in steps, and takes the first whose whole
-	 * arc is clear of the ceiling (see arcClear). 0.85 reaches about 4.4 blocks in 22 ticks; 0.55 is the ordinary big hop's
-	 * 2 blocks. Whatever the height, the forward speed is worked out from the time in the air so it lands in the same spot.
+	 * Blocks covered by the time it lands, per point of forward launch speed. The speed is cut to 0.546 of itself on the
+	 * launch tick (the friction of the block it is leaving), then to 0.91 of itself every tick in the air, over the 15
+	 * ticks the hop spends there: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ... for 14 ticks) is about 5.45.
 	 */
-	private static final double LEAP_MAX_LAUNCH_SPEED = 0.85;
-	private static final double LEAP_MIN_LAUNCH_SPEED = BIG_HOP_LAUNCH_SPEED;
-	private static final double LEAP_LAUNCH_SPEED_STEP = 0.05;
-	/** Ticks after landing that the animation's squash and recovery take. */
-	private static final int LEAP_RECOVERY_TICKS = 7;
-	/** The arc is only checked for the ceiling above this height over the ground; below it, the ground itself is in the way. */
-	private static final double LEAP_ARC_GROUND_MARGIN = 0.6;
-	/** Fast enough to cover the longest leap: (11 - 1) / 5.5 is about 1.8. */
-	private static final double LEAP_MAX_SPEED = 1.8;
-	/** Landing from a leap hits its target, and any monster within this many blocks, for this much damage and a shove. */
-	private static final float LEAP_IMPACT_DAMAGE = 4.0F;
-	private static final double LEAP_IMPACT_RADIUS = 2.5;
-	private static final double LEAP_IMPACT_KNOCKBACK = 0.6;
-	/**
-	 * After a leap lands, its first melee swing waits this many ticks. The chase starts at once, but a swing that lands in
-	 * the same tick as the impact merges with it: the damage-numbers mod shows one number per mob per tick, so the two
-	 * hits showed up as one (or the impact's was missed). Holding the swing a moment keeps them separate.
-	 */
-	private static final int LEAP_MELEE_HOLD_TICKS = 4;
+	private static final double LEAP_BLOCKS_PER_SPEED = 5.45;
+	/** Fast enough to cover the longest leap: (11 - 1) / 5.45 is about 1.83. */
+	private static final double LEAP_MAX_SPEED = 1.85;
 
 	// Eating the carrots in its off hand to heal.
 	/** How long one carrot takes to eat, in ticks (the same as a player's). */
@@ -163,9 +147,6 @@ public class BunnayEntity extends TamableAnimal {
 	private static final EntityDataAccessor<Boolean> DATA_EATING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
-
-	/** How many ticks the current hop spends in the air; the client stretches the animation's mid-air part to match. */
-	private static final EntityDataAccessor<Integer> DATA_HOP_AIR_TICKS = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.INT);
 
 	private static final EntityDataAccessor<Boolean> DATA_BIG_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -190,7 +171,6 @@ public class BunnayEntity extends TamableAnimal {
 	private @Nullable BlockPos jukeboxPos;
 	private int bigHopCooldown;
 	private int leapCooldown;
-	private int leapMeleeHold;
 	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
 	private int bigHopAnimationTicks;
 
@@ -205,7 +185,6 @@ public class BunnayEntity extends TamableAnimal {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_BIG_HOPPING, false);
 		entityData.define(DATA_EATING, false);
-		entityData.define(DATA_HOP_AIR_TICKS, BIG_HOP_AIR_TICKS);
 		entityData.define(DATA_DANCING, false);
 	}
 
@@ -298,8 +277,39 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	public boolean isHoldingBamboo() {
-		return this.getMainHandItem().is(Items.BAMBOO);
+	/** Whether it has a weapon in its main hand; this is what makes it raise the weapon when it closes on a target. */
+	public boolean isHoldingWeapon() {
+		return isHoldable(this.getMainHandItem());
+	}
+
+	public boolean isHoldingBreezeRod() {
+		return this.getMainHandItem().is(Items.BREEZE_ROD);
+	}
+
+	/** Extra damage per hit from what it is holding (neither item has an attack stat of its own). */
+	private static double weaponBonusDamage(ItemStack stack) {
+		if (stack.is(Items.BAMBOO)) {
+			return BAMBOO_BONUS_DAMAGE;
+		}
+		if (stack.is(Items.BREEZE_ROD)) {
+			return BREEZE_ROD_BONUS_DAMAGE;
+		}
+		return 0.0;
+	}
+
+	/**
+	 * Blasts a foe as if a wind charge had burst on it: a gust at its feet and the burst's sound, and a shove away from
+	 * the bunnay and up into the air, which it then falls from. This is the burst's launch without its explosion, so it
+	 * does not hit anything else or trigger blocks.
+	 */
+	private void windBurst(ServerLevel level, LivingEntity victim) {
+		double dx = victim.getX() - this.getX();
+		double dz = victim.getZ() - this.getZ();
+		double length = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
+		victim.setDeltaMovement(dx / length * WIND_BURST_HORIZONTAL, WIND_BURST_VERTICAL, dz / length * WIND_BURST_HORIZONTAL);
+		victim.needsSync = true;
+		level.sendParticles(ParticleTypes.GUST_EMITTER_SMALL, victim.getX(), victim.getY() + 0.1, victim.getZ(), 1, 0.0, 0.0, 0.0, 0.0);
+		level.playSound(null, victim.getX(), victim.getY(), victim.getZ(), SoundEvents.WIND_CHARGE_BURST.value(), SoundSource.NEUTRAL, 1.0F, 1.0F);
 	}
 
 	/** How far into the ready stance it is, for the renderer, smoothed between ticks. */
@@ -315,50 +325,24 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	public boolean doHurtTarget(ServerLevel level, Entity target) {
-		// The bamboo has no attack stat of its own, so add its bonus just for this swing.
-		boolean armed = this.isHoldingBamboo();
+		// What it holds has no attack stat of its own, so add its bonus just for this swing.
+		double bonus = weaponBonusDamage(this.getMainHandItem());
 		AttributeInstance attack = this.getAttribute(Attributes.ATTACK_DAMAGE);
-		if (armed) {
-			attack.addTransientModifier(new AttributeModifier(BAMBOO_DAMAGE_ID, BAMBOO_BONUS_DAMAGE, AttributeModifier.Operation.ADD_VALUE));
+		if (bonus > 0.0) {
+			attack.addTransientModifier(new AttributeModifier(WEAPON_DAMAGE_ID, bonus, AttributeModifier.Operation.ADD_VALUE));
 		}
+		boolean hit;
 		try {
-			return super.doHurtTarget(level, target);
+			hit = super.doHurtTarget(level, target);
 		} finally {
-			if (armed) {
-				attack.removeModifier(BAMBOO_DAMAGE_ID);
+			if (bonus > 0.0) {
+				attack.removeModifier(WEAPON_DAMAGE_ID);
 			}
 		}
-	}
-
-	/** Landing from a leap: a burst of dust from the ground, a thud, and a shove and some damage to its target and nearby monsters. */
-	private void leapImpact() {
-		if (!(this.level() instanceof ServerLevel server)) {
-			return;
+		if (hit && target instanceof LivingEntity victim && this.isHoldingBreezeRod()) {
+			this.windBurst(level, victim);
 		}
-		this.leapMeleeHold = LEAP_MELEE_HOLD_TICKS;
-		BlockState ground = server.getBlockState(this.blockPosition().below());
-		server.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, ground), this.getX(), this.getY(), this.getZ(), 24, 0.4, 0.1, 0.4, 0.15);
-		server.sendParticles(ParticleTypes.POOF, this.getX(), this.getY() + 0.1, this.getZ(), 6, 0.3, 0.05, 0.3, 0.02);
-		this.playSound(SoundEvents.GENERIC_BIG_FALL, 0.7F, 1.3F);
-
-		LivingEntity target = this.getTarget();
-		LivingEntity owner = this.getOwner();
-		DamageSource source = this.damageSources().mobAttack(this);
-		for (LivingEntity victim : server.getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(LEAP_IMPACT_RADIUS),
-			other -> other != this && other != owner && other.isAlive() && (other == target || other instanceof Enemy))) {
-			if (victim.hurtServer(server, source, LEAP_IMPACT_DAMAGE)) {
-				victim.knockback(LEAP_IMPACT_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), source, 0.0F);
-				// A burst of critical-hit sparks and a smack on whatever it landed on, so the hit is easy to see and hear.
-				server.sendParticles(ParticleTypes.CRIT, victim.getX(), victim.getY() + victim.getBbHeight() * 0.6, victim.getZ(), 16, 0.3, 0.3, 0.3, 0.3);
-				server.playSound(null, victim.getX(), victim.getY(), victim.getZ(), SoundEvents.PLAYER_ATTACK_CRIT, SoundSource.NEUTRAL, 1.0F, 1.0F);
-			}
-		}
-	}
-
-	// The melee goal asks this before it swings, so it is how a swing is held back right after a leap lands.
-	@Override
-	public boolean isWithinMeleeAttackRange(LivingEntity target) {
-		return this.leapMeleeHold <= 0 && super.isWithinMeleeAttackRange(target);
+		return hit;
 	}
 
 	public boolean isDancing() {
@@ -411,66 +395,6 @@ public class BunnayEntity extends TamableAnimal {
 
 	}
 
-	public int getHopAirTicks() {
-		return this.entityData.get(DATA_HOP_AIR_TICKS);
-	}
-
-	/**
-	 * Ticks a jump launched upward at this speed spends in the air, from the same motion rules the game uses: it moves by
-	 * its vertical speed, then loses 0.08 to gravity and 2% to drag. Counted until it is back down where it started.
-	 */
-	private static int airTicks(double launchSpeed) {
-		double height = 0.0;
-		double speed = launchSpeed;
-		int ticks = 0;
-		do {
-			height += speed;
-			speed = (speed - 0.08) * 0.98;
-			ticks++;
-		} while (height > 0.0 && ticks < 200);
-		return ticks;
-	}
-
-	/**
-	 * How far a jump with this many ticks in the air carries it, per point of forward launch speed, by the time it lands.
-	 * The forward speed is cut to 0.546 of itself on the launch tick (the friction of the block it is leaving), then to
-	 * 0.91 of itself every tick in the air: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ...). That is 5.45 for 15 ticks, about 6.3 for 23.
-	 */
-	private static double blocksPerSpeed(int airTicks) {
-		double total = 1.0;
-		double speed = 0.546;
-		for (int tick = 1; tick < airTicks; tick++) {
-			total += speed;
-			speed *= 0.91;
-		}
-		return total;
-	}
-
-	/**
-	 * Whether the arc of a jump with this launch speed, forward speed and direction is free of blocks, so it will not hit a
-	 * ceiling. This walks the same motion the jump will follow, one tick at a time, and checks the bunnay's box at each
-	 * point (above the ground margin, so the ground it is leaving and landing on does not count).
-	 */
-	private boolean arcClear(double launchSpeed, double forwardSpeed, double dirX, double dirZ, int airTicks) {
-		double x = this.getX();
-		double y = this.getY();
-		double z = this.getZ();
-		double rise = launchSpeed;
-		double forward = forwardSpeed;
-		double startY = y;
-		for (int tick = 0; tick < airTicks; tick++) {
-			x += dirX * forward;
-			z += dirZ * forward;
-			y += rise;
-			rise = (rise - 0.08) * 0.98;
-			forward *= tick == 0 ? 0.546 : 0.91;
-			if (y > startY + LEAP_ARC_GROUND_MARGIN && !this.level().noCollision(this.getDimensions(this.getPose()).makeBoundingBox(x, y, z))) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	public boolean isBigHopping() {
 		return this.entityData.get(DATA_BIG_HOPPING);
 	}
@@ -482,7 +406,7 @@ public class BunnayEntity extends TamableAnimal {
 			this.bigHopAnimationState.animateWhen(this.isBigHopping(), this.tickCount);
 			this.tickIdleAnimation();
 			this.readyProgressO = this.readyProgress;
-			boolean ready = this.isAggressive() && this.isHoldingBamboo();
+			boolean ready = this.isAggressive() && this.isHoldingWeapon();
 			this.readyProgress = Mth.clamp(this.readyProgress + (ready ? READY_RISE : -READY_FALL), 0.0F, 1.0F);
 			this.eatProgressO = this.eatProgress;
 			this.eatProgress = Mth.clamp(this.eatProgress + (this.isEating() ? EAT_RISE : -EAT_FALL), 0.0F, 1.0F);
@@ -492,9 +416,6 @@ public class BunnayEntity extends TamableAnimal {
 			}
 			if (this.leapCooldown > 0) {
 				this.leapCooldown--;
-			}
-			if (this.leapMeleeHold > 0) {
-				this.leapMeleeHold--;
 			}
 			if (this.bigHopAnimationTicks > 0 && --this.bigHopAnimationTicks == 0) {
 				this.entityData.set(DATA_BIG_HOPPING, false);
@@ -579,9 +500,9 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
-	/** Anything the bunnay can hold in its hand: for now just a bamboo. */
+	/** Anything the bunnay can hold in its main hand as a weapon: a bamboo or a breeze rod. */
 	public static boolean isHoldable(ItemStack stack) {
-		return stack.is(Items.BAMBOO);
+		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD);
 	}
 
 	@Override
@@ -775,7 +696,6 @@ public class BunnayEntity extends TamableAnimal {
 		public void start() {
 			this.ticks = 0;
 			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_HOP_AIR_TICKS, BIG_HOP_AIR_TICKS);
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 		}
 
@@ -868,11 +788,6 @@ public class BunnayEntity extends TamableAnimal {
 	private static final class LeapGoal extends Goal {
 		private final BunnayEntity bunnay;
 		private int ticks;
-		private boolean impacted;
-		/** Chosen when the leap starts: how fast it launches upward, how long that keeps it in the air, and how long the whole leap lasts. */
-		private double launchSpeed = LEAP_MIN_LAUNCH_SPEED;
-		private int airTicks = BIG_HOP_AIR_TICKS;
-		private int totalTicks = BIG_HOP_TICKS;
 
 		LeapGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -901,7 +816,7 @@ public class BunnayEntity extends TamableAnimal {
 		public boolean canContinueToUse() {
 			// Done on landing, so the chase starts again at once; the animation's squash and recovery play out by themselves.
 			boolean landed = this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
-			return this.ticks < this.totalTicks && !landed;
+			return this.ticks < BIG_HOP_TICKS && !landed;
 		}
 
 		@Override
@@ -917,37 +832,9 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.ticks = 0;
-			this.impacted = false;
-			this.chooseHeight();
 			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_HOP_AIR_TICKS, this.airTicks);
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
-			this.bunnay.bigHopAnimationTicks = this.totalTicks;
-		}
-
-		/**
-		 * Picks the highest launch speed whose arc to the target is clear of the ceiling, trying from the highest down.
-		 * If none is clear it uses the lowest, the ordinary big hop's, which is the best it can do.
-		 */
-		private void chooseHeight() {
-			this.launchSpeed = LEAP_MIN_LAUNCH_SPEED;
-			this.airTicks = BIG_HOP_AIR_TICKS;
-			LivingEntity target = this.bunnay.getTarget();
-			if (target != null) {
-				double dx = target.getX() - this.bunnay.getX();
-				double dz = target.getZ() - this.bunnay.getZ();
-				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
-				for (double candidate = LEAP_MAX_LAUNCH_SPEED; candidate > LEAP_MIN_LAUNCH_SPEED + 1.0E-6; candidate -= LEAP_LAUNCH_SPEED_STEP) {
-					int air = airTicks(candidate);
-					double speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / blocksPerSpeed(air), LEAP_MAX_SPEED);
-					if (this.bunnay.arcClear(candidate, speed, dx / distance, dz / distance, air)) {
-						this.launchSpeed = candidate;
-						this.airTicks = air;
-						break;
-					}
-				}
-			}
-			this.totalTicks = BIG_HOP_TAKEOFF_TICK + this.airTicks + LEAP_RECOVERY_TICKS;
+			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
 		}
 
 		@Override
@@ -971,7 +858,7 @@ public class BunnayEntity extends TamableAnimal {
 				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
 				forwardX = dx / distance;
 				forwardZ = dz / distance;
-				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / blocksPerSpeed(this.airTicks), LEAP_MAX_SPEED);
+				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
 				// Face the way it is going, so it does not leap sideways.
 				float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
 				this.bunnay.setYRot(yaw);
@@ -984,7 +871,7 @@ public class BunnayEntity extends TamableAnimal {
 				forwardZ = Math.cos(yaw);
 				speed = BIG_HOP_FORWARD_SPEED;
 			}
-			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, this.launchSpeed, forwardZ * speed));
+			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, BIG_HOP_LAUNCH_SPEED, forwardZ * speed));
 			this.bunnay.needsSync = true;
 			this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
 		}
@@ -993,12 +880,6 @@ public class BunnayEntity extends TamableAnimal {
 		public void stop() {
 			// The animation flag is cleared by the entity's timer, not here, so the clip is not cut short.
 			this.bunnay.leapCooldown = LEAP_COOLDOWN;
-			// The goal ends the moment it lands (see canContinueToUse), before tick would run again, so the landing
-			// impact happens here.
-			if (!this.impacted && this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround()) {
-				this.impacted = true;
-				this.bunnay.leapImpact();
-			}
 		}
 	}
 }

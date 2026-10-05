@@ -92,7 +92,7 @@ public class BunnayMenu extends AbstractContainerMenu {
 		return original;
 	}
 
-	/** Holds one weapon (for now a bamboo); nothing else fits. */
+	/** Holds one weapon (a bamboo or a breeze rod); nothing else fits. */
 	private static final class WeaponSlot extends Slot {
 		WeaponSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
