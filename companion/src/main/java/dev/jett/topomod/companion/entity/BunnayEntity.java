@@ -58,11 +58,11 @@ import java.util.EnumSet;
 
 import org.jspecify.annotations.Nullable;
 
-// Bunnay: a bunny-allay cross that can be tamed with seeds. It follows its owner and fights like a wolf; holding
+// Bunnay: a bunny-allay cross that can be tamed with carrots. It follows its owner and fights like a wolf; holding
 // weapons, sitting and an item screen will be built on this the way they were for the topo.
 public class BunnayEntity extends TamableAnimal {
 	private static final double WILD_HEALTH = 10.0;
-	private static final double TAME_HEALTH = 20.0;
+	private static final double TAME_HEALTH = 60.0;
 
 	// The big hop: a crouch, a launch, a couple of blocks of height, and a squashy landing. The keyframe clip is
 	// BunnayAnimation.BIG_HOP; these numbers have to stay in step with it (see the comment there).
@@ -91,6 +91,24 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
 
+	// The leap attack: from a distance, it can spring at its target with the same crouch and big hop animation, landing
+	// close to it. It reuses BIG_HOP_TICKS, BIG_HOP_TAKEOFF_TICK and BIG_HOP_LAUNCH_SPEED, so the clip still lines up.
+	/** The target has to be at least this far away (in blocks, along the ground) for a leap to be worth it, and no further than the max. */
+	private static final double LEAP_MIN_DISTANCE = 5.0;
+	private static final double LEAP_MAX_DISTANCE = 11.0;
+	/** Minimum ticks between leaps (8 seconds). */
+	private static final int LEAP_COOLDOWN = 160;
+	/** When it can leap, it decides to with a 1-in-this chance each time its goals are checked (so within a second or so). */
+	private static final int LEAP_ODDS = 4;
+	/** How far short of the target it aims to land, in blocks, so it does not run into it. */
+	private static final double LEAP_STOP_SHORT = 1.0;
+	/**
+	 * Blocks covered per point of forward launch speed, including the slide after landing (about 8.4 from the 15 ticks in
+	 * the air with the air's drag of 0.91 a tick, and about 1.2 more from the ground's friction). Approximate.
+	 */
+	private static final double LEAP_BLOCKS_PER_SPEED = 9.6;
+	private static final double LEAP_MAX_SPEED = 1.3;
+
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	private static final EntityDataAccessor<Boolean> DATA_BIG_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
@@ -109,6 +127,9 @@ public class BunnayEntity extends TamableAnimal {
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
 	private int bigHopCooldown;
+	private int leapCooldown;
+	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
+	private int bigHopAnimationTicks;
 	private boolean forceBigHop;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
@@ -220,8 +241,16 @@ public class BunnayEntity extends TamableAnimal {
 			this.readyProgressO = this.readyProgress;
 			boolean ready = this.isAggressive() && this.isHoldingBamboo();
 			this.readyProgress = Mth.clamp(this.readyProgress + (ready ? READY_RISE : -READY_FALL), 0.0F, 1.0F);
-		} else if (this.bigHopCooldown > 0) {
-			this.bigHopCooldown--;
+		} else {
+			if (this.bigHopCooldown > 0) {
+				this.bigHopCooldown--;
+			}
+			if (this.leapCooldown > 0) {
+				this.leapCooldown--;
+			}
+			if (this.bigHopAnimationTicks > 0 && --this.bigHopAnimationTicks == 0) {
+				this.entityData.set(DATA_BIG_HOPPING, false);
+			}
 		}
 	}
 
@@ -252,9 +281,11 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(1, new FloatGoal(this));
 		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
 		this.goalSelector.addGoal(2, new DanceGoal(this));
+		// The leap is priority 1 so it can interrupt the chase (the melee goal is 2), and it cannot be interrupted itself.
+		this.goalSelector.addGoal(1, new LeapGoal(this));
 		this.goalSelector.addGoal(2, new BigHopGoal(this));
 		this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.3, true));
-		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isTamingItem, false));
+		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
 		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
@@ -283,14 +314,9 @@ public class BunnayEntity extends TamableAnimal {
 		return stack.is(Items.CARROT) || stack.is(Items.GOLDEN_CARROT);
 	}
 
-	/** Wild bunnays are tamed, and tempted over, with seeds. Carrots are for feeding a tame one (see isFood). */
-	private boolean isTamingItem(ItemStack stack) {
-		return stack.is(Items.WHEAT_SEEDS);
-	}
-
-	/** Health a carrot or golden carrot restores. */
+	/** Health a carrot or golden carrot restores: a carrot 4 (2 hearts), a golden carrot 30 (15 hearts). */
 	private static float healAmount(ItemStack food) {
-		return food.is(Items.GOLDEN_CARROT) ? 8.0F : 4.0F;
+		return food.is(Items.GOLDEN_CARROT) ? 30.0F : 4.0F;
 	}
 
 	// It can't breed with its own kind (see getBreedOffspring), so feeding it never puts it in love mode.
@@ -327,7 +353,7 @@ public class BunnayEntity extends TamableAnimal {
 		}
 
 		if (this.isTame()) {
-			// Carrots heal a hurt bunnay (a golden carrot heals twice as much).
+			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more.
 			if (this.isOwnedBy(player) && this.isFood(stack) && this.getHealth() < this.getMaxHealth()) {
 				if (!this.level().isClientSide()) {
 					this.heal(healAmount(stack));
@@ -335,11 +361,12 @@ public class BunnayEntity extends TamableAnimal {
 				}
 				return InteractionResult.SUCCESS;
 			}
-		} else if (this.isTamingItem(stack)) {
-			// Each seed has a one in three chance of taming it (the same odds as the topo).
+		} else if (this.isFood(stack)) {
+			// A carrot has a one in three chance of taming it (the same odds as the topo), and a golden carrot always does.
 			if (!this.level().isClientSide()) {
+				boolean golden = stack.is(Items.GOLDEN_CARROT);
 				stack.consume(1, player);
-				if (this.random.nextInt(3) == 0) {
+				if (golden || this.random.nextInt(3) == 0) {
 					this.tame(player);
 					this.level().broadcastEntityEvent(this, (byte) 7);
 				} else {
@@ -518,6 +545,109 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.bunnay.getNavigation().stop();
+		}
+	}
+
+	/**
+	 * Springs at the target from a distance, with the big hop's crouch, flip and landing. The crouch lasts until the
+	 * takeoff tick, facing the target; then it launches with the forward speed it takes to land about a block short.
+	 * The goal ends as soon as it lands, so the chase resumes right away.
+	 */
+	private static final class LeapGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private int ticks;
+
+		LeapGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
+		}
+
+		@Override
+		public boolean canUse() {
+			LivingEntity target = this.bunnay.getTarget();
+			if (target == null || !target.isAlive() || this.bunnay.leapCooldown > 0 || this.bunnay.isBigHopping()) {
+				return false;
+			}
+			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing()) {
+				return false;
+			}
+			double dx = target.getX() - this.bunnay.getX();
+			double dz = target.getZ() - this.bunnay.getZ();
+			double distance = Math.sqrt(dx * dx + dz * dz);
+			return distance >= LEAP_MIN_DISTANCE && distance <= LEAP_MAX_DISTANCE
+				&& Math.abs(target.getY() - this.bunnay.getY()) <= 3.0
+				&& this.bunnay.hasLineOfSight(target)
+				&& this.bunnay.getRandom().nextInt(LEAP_ODDS) == 0;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			// Done on landing, so the chase starts again at once; the animation's squash and recovery play out by themselves.
+			boolean landed = this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
+			return this.ticks < BIG_HOP_TICKS && !landed;
+		}
+
+		@Override
+		public boolean isInterruptable() {
+			return false;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void start() {
+			this.ticks = 0;
+			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
+			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
+		}
+
+		@Override
+		public void tick() {
+			this.ticks++;
+			LivingEntity target = this.bunnay.getTarget();
+			if (target != null && this.ticks <= BIG_HOP_TAKEOFF_TICK) {
+				// Crouching down, turn to face it.
+				this.bunnay.getLookControl().setLookAt(target, 60.0F, 60.0F);
+			}
+			if (this.ticks != BIG_HOP_TAKEOFF_TICK) {
+				return;
+			}
+
+			double forwardX;
+			double forwardZ;
+			double speed;
+			if (target != null && target.isAlive()) {
+				double dx = target.getX() - this.bunnay.getX();
+				double dz = target.getZ() - this.bunnay.getZ();
+				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
+				forwardX = dx / distance;
+				forwardZ = dz / distance;
+				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
+				// Face the way it is going, so it does not leap sideways.
+				float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
+				this.bunnay.setYRot(yaw);
+				this.bunnay.yBodyRot = yaw;
+				this.bunnay.setYHeadRot(yaw);
+			} else {
+				// The target died or went away mid-crouch: just hop the way it is facing.
+				double yaw = Math.toRadians(this.bunnay.getYRot());
+				forwardX = -Math.sin(yaw);
+				forwardZ = Math.cos(yaw);
+				speed = BIG_HOP_FORWARD_SPEED;
+			}
+			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, BIG_HOP_LAUNCH_SPEED, forwardZ * speed));
+			this.bunnay.needsSync = true;
+			this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
+		}
+
+		@Override
+		public void stop() {
+			// The animation flag is cleared by the entity's timer, not here, so the clip is not cut short.
+			this.bunnay.leapCooldown = LEAP_COOLDOWN;
 		}
 	}
 }
