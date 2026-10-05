@@ -18,6 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -127,6 +128,12 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float LEAP_IMPACT_DAMAGE = 4.0F;
 	private static final double LEAP_IMPACT_RADIUS = 2.5;
 	private static final double LEAP_IMPACT_KNOCKBACK = 0.6;
+	/**
+	 * After a leap lands, its first melee swing waits this many ticks. The chase starts at once, but a swing that lands in
+	 * the same tick as the impact merges with it: the damage-numbers mod shows one number per mob per tick, so the two
+	 * hits showed up as one (or the impact's was missed). Holding the swing a moment keeps them separate.
+	 */
+	private static final int LEAP_MELEE_HOLD_TICKS = 4;
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -147,6 +154,7 @@ public class BunnayEntity extends TamableAnimal {
 	private @Nullable BlockPos jukeboxPos;
 	private int bigHopCooldown;
 	private int leapCooldown;
+	private int leapMeleeHold;
 	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
 	private int bigHopAnimationTicks;
 
@@ -200,6 +208,7 @@ public class BunnayEntity extends TamableAnimal {
 		if (!(this.level() instanceof ServerLevel server)) {
 			return;
 		}
+		this.leapMeleeHold = LEAP_MELEE_HOLD_TICKS;
 		BlockState ground = server.getBlockState(this.blockPosition().below());
 		server.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, ground), this.getX(), this.getY(), this.getZ(), 24, 0.4, 0.1, 0.4, 0.15);
 		server.sendParticles(ParticleTypes.POOF, this.getX(), this.getY() + 0.1, this.getZ(), 6, 0.3, 0.05, 0.3, 0.02);
@@ -212,8 +221,17 @@ public class BunnayEntity extends TamableAnimal {
 			other -> other != this && other != owner && other.isAlive() && (other == target || other instanceof Enemy))) {
 			if (victim.hurtServer(server, source, LEAP_IMPACT_DAMAGE)) {
 				victim.knockback(LEAP_IMPACT_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), source, 0.0F);
+				// A burst of critical-hit sparks and a smack on whatever it landed on, so the hit is easy to see and hear.
+				server.sendParticles(ParticleTypes.CRIT, victim.getX(), victim.getY() + victim.getBbHeight() * 0.6, victim.getZ(), 16, 0.3, 0.3, 0.3, 0.3);
+				server.playSound(null, victim.getX(), victim.getY(), victim.getZ(), SoundEvents.PLAYER_ATTACK_CRIT, SoundSource.NEUTRAL, 1.0F, 1.0F);
 			}
 		}
+	}
+
+	// The melee goal asks this before it swings, so it is how a swing is held back right after a leap lands.
+	@Override
+	public boolean isWithinMeleeAttackRange(LivingEntity target) {
+		return this.leapMeleeHold <= 0 && super.isWithinMeleeAttackRange(target);
 	}
 
 	public boolean isDancing() {
@@ -282,6 +300,9 @@ public class BunnayEntity extends TamableAnimal {
 			}
 			if (this.leapCooldown > 0) {
 				this.leapCooldown--;
+			}
+			if (this.leapMeleeHold > 0) {
+				this.leapMeleeHold--;
 			}
 			if (this.bigHopAnimationTicks > 0 && --this.bigHopAnimationTicks == 0) {
 				this.entityData.set(DATA_BIG_HOPPING, false);
