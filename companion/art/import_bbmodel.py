@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Turn the saved Blockbench project (topo.bbmodel) into the game's model code and texture.
 
-Usage (from the repo root):  python3 companion/art/import_bbmodel.py [path/to/other.bbmodel]
+Usage (from the repo root):  python3 companion/art/import_bbmodel.py [project.bbmodel [model.java [texture.png]]]
 
-Rewrites the generated block in TopoModel.java and the embedded texture in topo.png.
+With no arguments this is topo: it rewrites the generated block in TopoModel.java and the embedded texture in topo.png.
+For another mob, pass its project, the model class to rewrite (it needs the BEGIN/END GENERATED markers) and its texture.
 Needs the texture to be embedded in the project (Blockbench does this when you save).
 """
 import base64, io, json, math, os, re, sys
@@ -11,8 +12,8 @@ import base64, io, json, math, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BBMODEL = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "topo.bbmodel")
-MODEL_JAVA = os.path.join(ROOT, "src/client/java/dev/jett/topomod/companion/client/render/TopoModel.java")
-TEXTURE = os.path.join(ROOT, "src/main/resources/assets/topo_companion/textures/entity/topo/topo.png")
+MODEL_JAVA = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "src/client/java/dev/jett/topomod/companion/client/render/TopoModel.java")
+TEXTURE = sys.argv[3] if len(sys.argv) > 3 else os.path.join(ROOT, "src/main/resources/assets/topo_companion/textures/entity/topo/topo.png")
 
 def jf(v):
     v = round(float(v), 4)
@@ -134,7 +135,7 @@ def main():
     new, n = re.subn(r"(// BEGIN GENERATED[^\n]*\n).*?(\t\t// END GENERATED)",
                      lambda m: m.group(1) + "\n".join(lines) + "\n" + m.group(2), java, flags=re.S)
     if n != 1:
-        sys.exit("could not find the BEGIN/END GENERATED markers in TopoModel.java")
+        sys.exit("could not find the BEGIN/END GENERATED markers in " + MODEL_JAVA + "")
     new = re.sub(r"LayerDefinition\.create\(mesh, \d+, \d+\)", f"LayerDefinition.create(mesh, {tex_w}, {tex_h})", new)
     open(MODEL_JAVA, "w").write(new)
 

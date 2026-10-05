@@ -21,10 +21,21 @@ public final class ModItems {
 		new SpawnEggItem(new Item.Properties().setId(TOPO_SPAWN_EGG_KEY).spawnEgg(ModEntities.TOPO))
 	);
 
+	public static final ResourceKey<Item> BUNNAY_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, CompanionMod.id("bunnay_spawn_egg"));
+
+	public static final Item BUNNAY_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		BUNNAY_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(BUNNAY_SPAWN_EGG_KEY).spawnEgg(ModEntities.BUNNAY))
+	);
+
 	private ModItems() {
 	}
 
 	public static void register() {
-		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> entries.accept(TOPO_SPAWN_EGG));
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
+			entries.accept(TOPO_SPAWN_EGG);
+			entries.accept(BUNNAY_SPAWN_EGG);
+		});
 	}
 }

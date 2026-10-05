@@ -1,6 +1,7 @@
 package dev.jett.topomod.companion.registry;
 
 import dev.jett.topomod.companion.CompanionMod;
+import dev.jett.topomod.companion.entity.BunnayEntity;
 import dev.jett.topomod.companion.entity.TopoEntity;
 
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
@@ -25,10 +26,23 @@ public final class ModEntities {
 			.build(TOPO_KEY)
 	);
 
+	public static final ResourceKey<EntityType<?>> BUNNAY_KEY = ResourceKey.create(Registries.ENTITY_TYPE, CompanionMod.id("bunnay"));
+
+	public static final EntityType<BunnayEntity> BUNNAY = Registry.register(
+		BuiltInRegistries.ENTITY_TYPE,
+		BUNNAY_KEY,
+		EntityType.Builder.of(BunnayEntity::new, MobCategory.CREATURE)
+			.sized(0.5F, 0.875F)
+			.eyeHeight(0.7F)
+			.clientTrackingRange(8)
+			.build(BUNNAY_KEY)
+	);
+
 	private ModEntities() {
 	}
 
 	public static void register() {
 		FabricDefaultAttributeRegistry.register(TOPO, TopoEntity.createAttributes());
+		FabricDefaultAttributeRegistry.register(BUNNAY, BunnayEntity.createAttributes());
 	}
 }

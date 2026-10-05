@@ -38,3 +38,6 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# Models extracted from the Minecraft jar for reference only (Mojang assets, do not commit)
+companion/art/vanilla-reference/

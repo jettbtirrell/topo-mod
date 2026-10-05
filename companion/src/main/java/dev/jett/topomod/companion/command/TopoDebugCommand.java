@@ -7,6 +7,7 @@ import java.util.Map;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 
+import dev.jett.topomod.companion.entity.BunnayEntity;
 import dev.jett.topomod.companion.entity.TopoEntity;
 
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -42,7 +43,8 @@ public final class TopoDebugCommand {
 			dispatcher.register(Commands.literal("topo")
 				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.then(branch("idle", IDLES, false))
-				.then(branch("dance", DANCES, true))));
+				.then(branch("dance", DANCES, true))
+				.then(Commands.literal("bunnay_hop").executes(TopoDebugCommand::bunnayHop))));
 	}
 
 	private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> branch(
@@ -50,6 +52,21 @@ public final class TopoDebugCommand {
 		return Commands.literal(name).then(Commands.argument("name", StringArgumentType.word())
 			.suggests((context, builder) -> SharedSuggestionProvider.suggest(styles.keySet(), builder))
 			.executes(context -> play(context, styles, dance)));
+	}
+
+	private static int bunnayHop(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		Vec3 pos = source.getPosition();
+		List<BunnayEntity> bunnays = source.getLevel().getEntitiesOfClass(BunnayEntity.class,
+			AABB.ofSize(pos, SEARCH_RANGE * 2, SEARCH_RANGE * 2, SEARCH_RANGE * 2));
+		BunnayEntity bunnay = bunnays.stream().min(Comparator.comparingDouble(b -> b.distanceToSqr(pos))).orElse(null);
+		if (bunnay == null) {
+			source.sendFailure(Component.literal("No bunnay within " + (int) SEARCH_RANGE + " blocks."));
+			return 0;
+		}
+		bunnay.debugBigHop();
+		source.sendSuccess(() -> Component.literal("Bunnay will big hop."), false);
+		return 1;
 	}
 
 	private static int play(CommandContext<CommandSourceStack> context, Map<String, Integer> styles, boolean dance) {
