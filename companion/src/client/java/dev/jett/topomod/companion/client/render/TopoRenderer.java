@@ -6,6 +6,7 @@ import dev.jett.topomod.companion.entity.TopoEntity;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
+import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
 import net.minecraft.resources.Identifier;
 
 public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoModel> {
@@ -14,6 +15,7 @@ public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoM
 
 	public TopoRenderer(EntityRendererProvider.Context context) {
 		super(context, new TopoModel(context.bakeLayer(LAYER)), 0.3F);
+		this.addLayer(new TopoHeldItemLayer(this));
 	}
 
 	@Override
@@ -29,6 +31,9 @@ public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoM
 	@Override
 	public void extractRenderState(TopoEntity entity, TopoRenderState state, float partialTicks) {
 		super.extractRenderState(entity, state, partialTicks);
+		ArmedEntityRenderState.extractArmedEntityRenderState(entity, state, this.itemModelResolver, partialTicks);
 		state.sitting = entity.isInSittingPose();
+		state.holdingItem = !state.rightHandItemStack.isEmpty();
+		state.danceTime = entity.getDanceTime(partialTicks);
 	}
 }

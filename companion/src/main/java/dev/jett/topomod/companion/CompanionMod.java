@@ -2,6 +2,7 @@ package dev.jett.topomod.companion;
 
 import dev.jett.topomod.companion.registry.ModEntities;
 import dev.jett.topomod.companion.registry.ModItems;
+import dev.jett.topomod.companion.registry.ModMenus;
 
 import net.fabricmc.api.ModInitializer;
 
@@ -18,6 +19,7 @@ public class CompanionMod implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ModEntities.register();
+		ModMenus.register();
 		ModItems.register();
 		LOGGER.info("Topo Companion loaded");
 	}
