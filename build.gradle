@@ -12,6 +12,15 @@ subprojects {
 	loom {
 		splitEnvironmentSourceSets()
 
+		runs {
+			client {
+				// Without this the dev client picks a random name (and so a new player ID) every launch,
+				// and anything you tamed in an earlier launch would belong to a "different player".
+				programArg "--username"
+				programArg "TopoDev"
+			}
+		}
+
 		mods {
 			"${project.mod_id}" {
 				sourceSet sourceSets.main
