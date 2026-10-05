@@ -11,6 +11,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -21,7 +22,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.entity.monster.Enemy;
 import dev.jett.topomod.companion.menu.TopoMenu;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -123,11 +123,11 @@ public class TopoEntity extends TamableAnimal {
 		super.setRemainingFireTicks(remainingTicks);
 	}
 
-	// Called on whoever gets credit for a kill, which also covers enemies that burn to death after a torch hit.
+	// Called on whoever gets credit for a kill, which also covers mobs that burn to death after a torch hit.
 	@Override
 	public void awardKillScore(Entity victim, DamageSource killingBlow) {
 		super.awardKillScore(victim, killingBlow);
-		if (!this.level().isClientSide() && victim instanceof Enemy) {
+		if (!this.level().isClientSide()) {
 			this.startDance();
 		}
 	}
@@ -151,7 +151,7 @@ public class TopoEntity extends TamableAnimal {
 	@Override
 	protected void registerGoals() {
 		this.goalSelector.addGoal(1, new FloatGoal(this));
-		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5));
+		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
 		this.goalSelector.addGoal(2, new SitWhenOrderedToGoal(this));
 		this.goalSelector.addGoal(2, new DanceGoal(this));
 		this.goalSelector.addGoal(3, new MeleeAttackGoal(this, 1.3, true));
