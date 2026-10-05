@@ -42,5 +42,9 @@ public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoM
 			state.holdStyle = TopoRenderState.HoldStyle.ONE_PAW;
 		}
 		state.danceTime = entity.getDanceTime(partialTicks);
+		state.danceStyle = entity.getDanceStyle();
+		state.idleTime = entity.getIdleTime(partialTicks);
+		state.idleStyle = entity.getIdleStyle();
+		state.phase = entity.getId() * 37.3F;
 	}
 }

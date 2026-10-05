@@ -70,6 +70,54 @@ import org.jspecify.annotations.Nullable;
 public class TopoEntity extends TamableAnimal {
 	/** Length of the victory dance in ticks. The renderer uses this to time the animation. */
 	public static final int DANCE_LENGTH = 50;
+	/** The dances a topo can do; one is picked at random each time. The renderer plays the matching animation. */
+	public static final int DANCE_SPIN = 0;
+	public static final int DANCE_BACKFLIP = 1;
+	public static final int DANCE_MOONWALK = 2;
+	/** Relative odds of each dance: 70% the main spin, 20% the moonwalk, 10% the backflip. */
+	private static final int DANCE_SPIN_WEIGHT = 70;
+	private static final int DANCE_MOONWALK_WEIGHT = 20;
+	private static final int DANCE_BACKFLIP_WEIGHT = 10;
+	private static final int BACKFLIP_LENGTH = 50;
+	private static final int MOONWALK_LENGTH = 70;
+	/** How fast the moonwalk glides backward, in blocks per tick. */
+	private static final double MOONWALK_SPEED = 0.05;
+
+	// Idle animations: little bits of life while the topo is standing around. The renderer plays the matching one.
+	public static final int IDLE_NONE = 0;
+	public static final int IDLE_LOOK_AROUND = 1;
+	public static final int IDLE_GROOM = 2;
+	public static final int IDLE_TAIL_CHASE = 3;
+	public static final int IDLE_SHAKE = 4;
+	public static final int IDLE_HOP = 5;
+	/**
+	 * Tuning for how often an idle animation starts. After the pause, a standing-still topo starts one with a
+	 * 1-in-IDLE_ODDS chance each tick: with these numbers a topo that stays idle does one about every 45 seconds
+	 * (a 15 second pause plus 30 seconds on average). Lower both to see them more often while testing.
+	 */
+	private static final int IDLE_PAUSE_TICKS = 300;
+	private static final int IDLE_ODDS = 600;
+
+	/** Length of an idle animation in ticks. */
+	public static int idleLength(int style) {
+		return switch (style) {
+			case IDLE_LOOK_AROUND -> 50;
+			case IDLE_GROOM -> 60;
+			case IDLE_TAIL_CHASE -> 36;
+			case IDLE_SHAKE -> 20;
+			case IDLE_HOP -> 24;
+			default -> 0;
+		};
+	}
+
+	/** Length of a dance in ticks. Each dance has its own pace. */
+	public static int danceLength(int style) {
+		return switch (style) {
+			case DANCE_BACKFLIP -> BACKFLIP_LENGTH;
+			case DANCE_MOONWALK -> MOONWALK_LENGTH;
+			default -> DANCE_LENGTH;
+		};
+	}
 	/** How long a torch-hit keeps a target burning, in ticks. */
 	private static final int TORCH_FIRE_TICKS = 100;
 	/** Max health while wild, and once tamed (like wolves, taming also fully heals). */
@@ -107,12 +155,18 @@ public class TopoEntity extends TamableAnimal {
 
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(TopoEntity.class, EntityDataSerializers.BOOLEAN);
+	private static final EntityDataAccessor<Integer> DATA_IDLE_STYLE = SynchedEntityData.defineId(TopoEntity.class, EntityDataSerializers.INT);
+	private static final EntityDataAccessor<Integer> DATA_DANCE_STYLE = SynchedEntityData.defineId(TopoEntity.class, EntityDataSerializers.INT);
 
 	/**
 	 * Ticks into the current dance. Each side counts this itself (the server ends the dance), so the
 	 * client's animation clock never jumps around with network timing.
 	 */
 	private int danceElapsed;
+
+	/** Same idea for idle animations: each side counts its own elapsed ticks, and the server decides when they end. */
+	private int idleElapsed;
+	private int idlePause = IDLE_PAUSE_TICKS / 2;
 
 	/** The last mob this topo hit, and when to stop caring about it (server only). */
 	private @Nullable LivingEntity lastVictim;
@@ -136,6 +190,8 @@ public class TopoEntity extends TamableAnimal {
 	protected void defineSynchedData(SynchedEntityData.Builder entityData) {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_DANCING, false);
+		entityData.define(DATA_DANCE_STYLE, DANCE_SPIN);
+		entityData.define(DATA_IDLE_STYLE, IDLE_NONE);
 	}
 
 	public static boolean isTorch(ItemStack stack) {
@@ -174,18 +230,45 @@ public class TopoEntity extends TamableAnimal {
 		return isEnderPearl(this.getMainHandItem());
 	}
 
+	/** Picks a dance at random: the main spin dance most of the time, the moonwalk now and then, the backflip rarely. */
+	private int pickDanceStyle() {
+		int roll = this.random.nextInt(DANCE_SPIN_WEIGHT + DANCE_MOONWALK_WEIGHT + DANCE_BACKFLIP_WEIGHT);
+		if (roll < DANCE_SPIN_WEIGHT) {
+			return DANCE_SPIN;
+		}
+		return roll < DANCE_SPIN_WEIGHT + DANCE_MOONWALK_WEIGHT ? DANCE_MOONWALK : DANCE_BACKFLIP;
+	}
+
+	/** Which idle animation is playing (one of the IDLE_ constants), or IDLE_NONE. */
+	public int getIdleStyle() {
+		return this.entityData.get(DATA_IDLE_STYLE);
+	}
+
+	/** Ticks since the idle animation began (with partial ticks), or -1 when none is playing. */
+	public float getIdleTime(float partialTick) {
+		int style = this.getIdleStyle();
+		return style == IDLE_NONE ? -1.0F : Math.min(this.idleElapsed + partialTick, idleLength(style));
+	}
+
+	/** Which dance is playing (one of the DANCE_ constants); only meaningful while dancing. */
+	public int getDanceStyle() {
+		return this.entityData.get(DATA_DANCE_STYLE);
+	}
+
 	public boolean isDancing() {
 		return this.entityData.get(DATA_DANCING);
 	}
 
 	/** Ticks since the dance began (with partial ticks), or -1 when not dancing. Used by the renderer. */
 	public float getDanceTime(float partialTick) {
-		return this.isDancing() ? Math.min(this.danceElapsed + partialTick, DANCE_LENGTH) : -1.0F;
+		return this.isDancing() ? Math.min(this.danceElapsed + partialTick, danceLength(this.getDanceStyle())) : -1.0F;
 	}
 
 	public void startDance() {
 		if (!this.isDancing() && !this.isOrderedToSit()) {
 			this.danceElapsed = 0;
+			// Set the style first so the client never sees a dance without one.
+			this.entityData.set(DATA_DANCE_STYLE, this.pickDanceStyle());
 			this.entityData.set(DATA_DANCING, true);
 		}
 	}
@@ -215,12 +298,68 @@ public class TopoEntity extends TamableAnimal {
 
 		if (this.isDancing()) {
 			this.danceElapsed++;
-			if (!this.level().isClientSide() && this.danceElapsed >= DANCE_LENGTH) {
+			if (!this.level().isClientSide() && this.danceElapsed >= danceLength(this.getDanceStyle())) {
 				this.entityData.set(DATA_DANCING, false);
 			}
 		} else {
 			this.danceElapsed = 0;
 		}
+
+		this.tickIdle();
+	}
+
+	/** Starts, plays and ends the idle animations. The server decides; the client just counts along. */
+	private void tickIdle() {
+		int style = this.getIdleStyle();
+		if (this.level().isClientSide()) {
+			this.idleElapsed = style == IDLE_NONE ? 0 : this.idleElapsed + 1;
+			return;
+		}
+
+		if (style != IDLE_NONE) {
+			this.idleElapsed++;
+			if (this.idleElapsed >= idleLength(style) || !this.canIdle()) {
+				this.stopIdle();
+			}
+			return;
+		}
+
+		this.idleElapsed = 0;
+		if (this.idlePause > 0) {
+			this.idlePause--;
+		} else if (this.canIdle() && this.random.nextInt(IDLE_ODDS) == 0) {
+			this.startIdle();
+		}
+	}
+
+	/** Only when the topo is standing about doing nothing: not fighting, dancing, sitting, walking or swimming. */
+	private boolean canIdle() {
+		LivingEntity target = this.getTarget();
+		return !this.isDancing()
+			&& !this.isOrderedToSit()
+			&& !this.isInSittingPose()
+			&& (target == null || !target.isAlive())
+			&& this.onGround()
+			&& !this.isInWater()
+			&& !this.isPassenger()
+			&& this.hurtTime == 0
+			&& this.getNavigation().isDone()
+			&& this.getDeltaMovement().horizontalDistanceSqr() < 4.0E-4;
+	}
+
+	private void startIdle() {
+		// Grooming needs both paws free to wash its face.
+		int style = this.getMainHandItem().isEmpty()
+			? 1 + this.random.nextInt(5)
+			: new int[]{IDLE_LOOK_AROUND, IDLE_TAIL_CHASE, IDLE_SHAKE, IDLE_HOP}[this.random.nextInt(4)];
+		this.idleElapsed = 0;
+		this.entityData.set(DATA_IDLE_STYLE, style);
+	}
+
+	private void stopIdle() {
+		this.entityData.set(DATA_IDLE_STYLE, IDLE_NONE);
+		this.idleElapsed = 0;
+		this.idlePause = IDLE_PAUSE_TICKS;
 	}
 
 	// Ignore attempts to clear the target while a pearl-teleported mob is still its target (see onPearlHit).
@@ -448,6 +587,8 @@ public class TopoEntity extends TamableAnimal {
 		this.goalSelector.addGoal(3, new MeleeAttackGoal(this, 1.3, true));
 		this.goalSelector.addGoal(4, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(5, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
+		// Same priority as strolling, so it can't be started over by a stroll but the owner walking off (5) interrupts it.
+		this.goalSelector.addGoal(6, new IdleGoal(this));
 		this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F));
 		this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -585,9 +726,13 @@ public class TopoEntity extends TamableAnimal {
 		}
 	}
 
-	/** Stands still and lets the model do its victory dance. */
+	/**
+	 * Stands still and lets the model do its victory dance. The moonwalk is the exception: the topo really does
+	 * glide backward, keeping its face toward where it was looking.
+	 */
 	private static final class DanceGoal extends Goal {
 		private final TopoEntity topo;
+		private Vec3 backward = Vec3.ZERO;
 
 		DanceGoal(TopoEntity topo) {
 			this.topo = topo;
@@ -599,6 +744,53 @@ public class TopoEntity extends TamableAnimal {
 			net.minecraft.world.entity.LivingEntity target = this.topo.getTarget();
 			boolean fighting = target != null && target.isAlive();
 			return this.topo.isDancing() && !this.topo.isOrderedToSit() && !fighting;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void start() {
+			this.topo.getNavigation().stop();
+			// Minecraft's forward is (-sin yaw, cos yaw), so backward is the opposite.
+			double yaw = Math.toRadians(this.topo.yBodyRot);
+			this.backward = new Vec3(Math.sin(yaw), 0.0, -Math.cos(yaw));
+		}
+
+		@Override
+		public void tick() {
+			if (this.topo.getDanceStyle() != DANCE_MOONWALK) {
+				return;
+			}
+			// Don't glide off a ledge: there has to be ground a short way behind.
+			Vec3 step = this.backward.scale(MOONWALK_SPEED);
+			BlockPos below = BlockPos.containing(this.topo.getX() + step.x * 10.0, this.topo.getY() - 0.5, this.topo.getZ() + step.z * 10.0);
+			if (!this.topo.level().getBlockState(below).getCollisionShape(this.topo.level(), below).isEmpty()) {
+				Vec3 motion = this.topo.getDeltaMovement();
+				this.topo.setDeltaMovement(step.x, motion.y, step.z);
+			}
+		}
+	}
+
+	/** Keeps the topo still, and looking where the animation wants, while an idle animation plays. */
+	private static final class IdleGoal extends Goal {
+		private final TopoEntity topo;
+
+		IdleGoal(TopoEntity topo) {
+			this.topo = topo;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		@Override
+		public boolean canUse() {
+			return this.topo.getIdleStyle() != IDLE_NONE;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.topo.getIdleStyle() != IDLE_NONE;
 		}
 
 		@Override
