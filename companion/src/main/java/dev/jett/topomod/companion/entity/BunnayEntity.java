@@ -4,11 +4,17 @@ import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
+
+import net.minecraft.core.particles.BlockParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
@@ -34,19 +40,26 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.SitWhenOrderedToGoal;
 import net.minecraft.world.entity.ai.goal.TemptGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import dev.jett.topomod.companion.CompanionMod;
+import dev.jett.topomod.companion.menu.BunnayMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.DynamicGameEventListener;
 import net.minecraft.world.level.gameevent.EntityPositionSource;
 import net.minecraft.world.level.gameevent.GameEvent;
@@ -72,7 +85,7 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int BIG_HOP_TAKEOFF_TICK = 4;
 	/** Upward speed at takeoff; 0.55 gives about 2 blocks of height and 15 ticks in the air. */
 	private static final double BIG_HOP_LAUNCH_SPEED = 0.55;
-	/** Forward speed at takeoff, which carries it about 2.5 blocks (it was 0.25, about 2). */
+	/** Forward speed at takeoff, which carries it about 1.7 blocks (see LEAP_BLOCKS_PER_SPEED: about 5.5 blocks per point of speed). */
 	private static final double BIG_HOP_FORWARD_SPEED = 0.30;
 	/** A walking bunnay starts a big hop with a 1-in-this chance each time its goals are checked (about every 6 seconds). */
 	private static final int BIG_HOP_ODDS = 40;
@@ -103,11 +116,17 @@ public class BunnayEntity extends TamableAnimal {
 	/** How far short of the target it aims to land, in blocks, so it does not run into it. */
 	private static final double LEAP_STOP_SHORT = 1.0;
 	/**
-	 * Blocks covered per point of forward launch speed, including the slide after landing (about 8.4 from the 15 ticks in
-	 * the air with the air's drag of 0.91 a tick, and about 1.2 more from the ground's friction). Approximate.
+	 * Blocks covered by the time it lands, per point of forward launch speed. The speed is cut to 0.546 of itself on the
+	 * launch tick (the friction of the block it is leaving), then to 0.91 of itself every tick in the air, over the 15 ticks
+	 * of the jump: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ... for 14 ticks) is about 5.5.
 	 */
-	private static final double LEAP_BLOCKS_PER_SPEED = 9.6;
-	private static final double LEAP_MAX_SPEED = 1.3;
+	private static final double LEAP_BLOCKS_PER_SPEED = 5.5;
+	/** Fast enough to cover the longest leap: (11 - 1) / 5.5 is about 1.8. */
+	private static final double LEAP_MAX_SPEED = 1.8;
+	/** Landing from a leap hits its target, and any monster within this many blocks, for this much damage and a shove. */
+	private static final float LEAP_IMPACT_DAMAGE = 4.0F;
+	private static final double LEAP_IMPACT_RADIUS = 2.5;
+	private static final double LEAP_IMPACT_KNOCKBACK = 0.6;
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -130,7 +149,6 @@ public class BunnayEntity extends TamableAnimal {
 	private int leapCooldown;
 	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
 	private int bigHopAnimationTicks;
-	private boolean forceBigHop;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
 		super(type, level);
@@ -173,6 +191,27 @@ public class BunnayEntity extends TamableAnimal {
 		} finally {
 			if (armed) {
 				attack.removeModifier(BAMBOO_DAMAGE_ID);
+			}
+		}
+	}
+
+	/** Landing from a leap: a burst of dust from the ground, a thud, and a shove and some damage to its target and nearby monsters. */
+	private void leapImpact() {
+		if (!(this.level() instanceof ServerLevel server)) {
+			return;
+		}
+		BlockState ground = server.getBlockState(this.blockPosition().below());
+		server.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, ground), this.getX(), this.getY(), this.getZ(), 24, 0.4, 0.1, 0.4, 0.15);
+		server.sendParticles(ParticleTypes.POOF, this.getX(), this.getY() + 0.1, this.getZ(), 6, 0.3, 0.05, 0.3, 0.02);
+		this.playSound(SoundEvents.GENERIC_BIG_FALL, 0.7F, 1.3F);
+
+		LivingEntity target = this.getTarget();
+		LivingEntity owner = this.getOwner();
+		DamageSource source = this.damageSources().mobAttack(this);
+		for (LivingEntity victim : server.getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(LEAP_IMPACT_RADIUS),
+			other -> other != this && other != owner && other.isAlive() && (other == target || other instanceof Enemy))) {
+			if (victim.hurtServer(server, source, LEAP_IMPACT_DAMAGE)) {
+				victim.knockback(LEAP_IMPACT_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), source, 0.0F);
 			}
 		}
 	}
@@ -221,15 +260,11 @@ public class BunnayEntity extends TamableAnimal {
 			this.jukeboxPos = null;
 			this.setDancing(false);
 		}
+
 	}
 
 	public boolean isBigHopping() {
 		return this.entityData.get(DATA_BIG_HOPPING);
-	}
-
-	// DEBUG: used by TopoDebugCommand to preview the big hop. Remove together with that command.
-	public void debugBigHop() {
-		this.forceBigHop = true;
 	}
 
 	@Override
@@ -279,6 +314,7 @@ public class BunnayEntity extends TamableAnimal {
 	@Override
 	protected void registerGoals() {
 		this.goalSelector.addGoal(1, new FloatGoal(this));
+		this.goalSelector.addGoal(1, new SitWhenOrderedToGoal(this));
 		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
 		this.goalSelector.addGoal(2, new DanceGoal(this));
 		// The leap is priority 1 so it can interrupt the chase (the melee goal is 2), and it cannot be interrupted itself.
@@ -325,13 +361,30 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
+	/** Anything the bunnay can hold in its hand: for now just a bamboo. */
+	public static boolean isHoldable(ItemStack stack) {
+		return stack.is(Items.BAMBOO);
+	}
+
 	@Override
 	public InteractionResult mobInteract(Player player, InteractionHand hand) {
 		ItemStack stack = player.getItemInHand(hand);
 
-		if (this.isTame() && this.isOwnedBy(player)) {
-			// Handing it a bamboo equips it straight away.
-			if (stack.is(Items.BAMBOO) && this.getMainHandItem().isEmpty()) {
+		if (this.isTame()) {
+			if (!this.isOwnedBy(player)) {
+				return super.mobInteract(player, hand);
+			}
+
+			// Sneak + right-click opens the equipment screen.
+			if (player.isSecondaryUseActive()) {
+				if (!this.level().isClientSide()) {
+					player.openMenu(new EquipmentMenuProvider());
+				}
+				return InteractionResult.SUCCESS;
+			}
+
+			// Handing it a weapon equips it straight away.
+			if (isHoldable(stack) && this.getMainHandItem().isEmpty()) {
 				if (!this.level().isClientSide()) {
 					this.setItemSlot(EquipmentSlot.MAINHAND, stack.split(1));
 					this.setGuaranteedDrop(EquipmentSlot.MAINHAND);
@@ -339,29 +392,31 @@ public class BunnayEntity extends TamableAnimal {
 				}
 				return InteractionResult.SUCCESS;
 			}
-			// Sneaking with an empty hand takes it back.
-			if (player.isSecondaryUseActive() && stack.isEmpty() && !this.getMainHandItem().isEmpty()) {
-				if (!this.level().isClientSide()) {
-					// Only take it if it fits in the player's inventory, so it can never be lost.
-					ItemStack held = this.getMainHandItem().copy();
-					if (player.addItem(held)) {
-						this.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+
+			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more. At full health the carrot is left
+			// alone, so you can still eat it.
+			if (this.isFood(stack)) {
+				if (this.getHealth() < this.getMaxHealth()) {
+					if (!this.level().isClientSide()) {
+						this.heal(healAmount(stack));
+						stack.consume(1, player);
 					}
+					return InteractionResult.SUCCESS;
 				}
-				return InteractionResult.SUCCESS;
+				return InteractionResult.PASS;
 			}
+
+			// Empty-handed (or any other item) click toggles sitting.
+			if (!this.level().isClientSide()) {
+				this.setOrderedToSit(!this.isOrderedToSit());
+				this.setJumping(false);
+				this.getNavigation().stop();
+				this.setTarget(null);
+			}
+			return InteractionResult.SUCCESS;
 		}
 
-		if (this.isTame()) {
-			// Carrots heal a hurt bunnay, and a golden carrot heals a great deal more.
-			if (this.isOwnedBy(player) && this.isFood(stack) && this.getHealth() < this.getMaxHealth()) {
-				if (!this.level().isClientSide()) {
-					this.heal(healAmount(stack));
-					stack.consume(1, player);
-				}
-				return InteractionResult.SUCCESS;
-			}
-		} else if (this.isFood(stack)) {
+		if (this.isFood(stack)) {
 			// A carrot has a one in three chance of taming it (the same odds as the topo), and a golden carrot always does.
 			if (!this.level().isClientSide()) {
 				boolean golden = stack.is(Items.GOLDEN_CARROT);
@@ -378,6 +433,34 @@ public class BunnayEntity extends TamableAnimal {
 		}
 
 		return super.mobInteract(player, hand);
+	}
+
+	// A hit makes a sitting bunnay stand up, so it can defend itself.
+	@Override
+	public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+		boolean hurt = super.hurtServer(level, source, damage);
+		if (hurt && this.isOrderedToSit()) {
+			this.setOrderedToSit(false);
+		}
+		return hurt;
+	}
+
+	/** Opens the equipment screen; the client is told which bunnay it belongs to via the entity id. */
+	private final class EquipmentMenuProvider implements ExtendedMenuProvider<Integer> {
+		@Override
+		public Component getDisplayName() {
+			return BunnayEntity.this.getDisplayName();
+		}
+
+		@Override
+		public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+			return new BunnayMenu(containerId, inventory, BunnayEntity.this);
+		}
+
+		@Override
+		public Integer getScreenOpeningData(ServerPlayer player) {
+			return BunnayEntity.this.getId();
+		}
 	}
 
 	@Override
@@ -431,11 +514,8 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public boolean canUse() {
-			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing()) {
+			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
 				return false;
-			}
-			if (this.bunnay.forceBigHop) {
-				return true;
 			}
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.bigHopCooldown <= 0
@@ -462,7 +542,6 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.ticks = 0;
-			this.bunnay.forceBigHop = false;
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 		}
@@ -556,6 +635,7 @@ public class BunnayEntity extends TamableAnimal {
 	private static final class LeapGoal extends Goal {
 		private final BunnayEntity bunnay;
 		private int ticks;
+		private boolean impacted;
 
 		LeapGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -568,7 +648,7 @@ public class BunnayEntity extends TamableAnimal {
 			if (target == null || !target.isAlive() || this.bunnay.leapCooldown > 0 || this.bunnay.isBigHopping()) {
 				return false;
 			}
-			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing()) {
+			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
 				return false;
 			}
 			double dx = target.getX() - this.bunnay.getX();
@@ -600,6 +680,7 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.ticks = 0;
+			this.impacted = false;
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
@@ -648,6 +729,12 @@ public class BunnayEntity extends TamableAnimal {
 		public void stop() {
 			// The animation flag is cleared by the entity's timer, not here, so the clip is not cut short.
 			this.bunnay.leapCooldown = LEAP_COOLDOWN;
+			// The goal ends the moment it lands (see canContinueToUse), before tick would run again, so the landing
+			// impact happens here.
+			if (!this.impacted && this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround()) {
+				this.impacted = true;
+				this.bunnay.leapImpact();
+			}
 		}
 	}
 }

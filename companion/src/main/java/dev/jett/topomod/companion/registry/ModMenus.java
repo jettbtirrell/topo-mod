@@ -1,7 +1,9 @@
 package dev.jett.topomod.companion.registry;
 
 import dev.jett.topomod.companion.CompanionMod;
+import dev.jett.topomod.companion.entity.BunnayEntity;
 import dev.jett.topomod.companion.entity.TopoEntity;
+import dev.jett.topomod.companion.menu.BunnayMenu;
 import dev.jett.topomod.companion.menu.TopoMenu;
 
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuType;
@@ -23,6 +25,18 @@ public final class ModMenus {
 				throw new IllegalStateException("No topo with entity id " + entityId);
 			}
 			return new TopoMenu(containerId, inventory, topo);
+		}, ByteBufCodecs.VAR_INT)
+	);
+
+	public static final MenuType<BunnayMenu> BUNNAY = Registry.register(
+		BuiltInRegistries.MENU,
+		CompanionMod.id("bunnay"),
+		new ExtendedMenuType<BunnayMenu, Integer>((containerId, inventory, entityId) -> {
+			Entity entity = inventory.player.level().getEntity(entityId);
+			if (!(entity instanceof BunnayEntity bunnay)) {
+				throw new IllegalStateException("No bunnay with entity id " + entityId);
+			}
+			return new BunnayMenu(containerId, inventory, bunnay);
 		}, ByteBufCodecs.VAR_INT)
 	);
 

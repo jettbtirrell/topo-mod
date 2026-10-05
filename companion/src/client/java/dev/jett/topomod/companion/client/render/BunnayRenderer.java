@@ -37,5 +37,6 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 		state.bigHopAnimationState.copyFrom(entity.bigHopAnimationState);
 		state.idleAnimationState.copyFrom(entity.idleAnimationState);
 		state.isDancing = entity.isDancing();
+		state.isSitting = entity.isInSittingPose();
 	}
 }

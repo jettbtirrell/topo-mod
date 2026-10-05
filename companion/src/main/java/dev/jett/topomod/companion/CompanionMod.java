@@ -1,6 +1,5 @@
 package dev.jett.topomod.companion;
 
-import dev.jett.topomod.companion.command.TopoDebugCommand;
 import dev.jett.topomod.companion.entity.BunnayBreeding;
 import dev.jett.topomod.companion.registry.ModEntities;
 import dev.jett.topomod.companion.registry.ModItems;
@@ -24,7 +23,6 @@ public class CompanionMod implements ModInitializer {
 		ModMenus.register();
 		ModItems.register();
 		BunnayBreeding.register();
-		TopoDebugCommand.register(); // DEBUG: remove with the command
 		LOGGER.info("Topo Companion loaded");
 	}
 

@@ -268,28 +268,6 @@ public class TopoEntity extends TamableAnimal {
 		}
 	}
 
-	// DEBUG: used by TopoDebugCommand to preview animations on demand. Remove together with that command.
-	/** Starts the given idle animation right now (server side). Returns false if one is already playing. */
-	public boolean debugPlayIdle(int style) {
-		if (this.getIdleStyle() != IDLE_NONE) {
-			return false;
-		}
-		this.idleElapsed = 0;
-		this.entityData.set(DATA_IDLE_STYLE, style);
-		return true;
-	}
-
-	// DEBUG: see debugPlayIdle. Returns false if a dance is already playing.
-	public boolean debugPlayDance(int style) {
-		if (this.isDancing()) {
-			return false;
-		}
-		this.danceElapsed = 0;
-		this.entityData.set(DATA_DANCE_STYLE, style);
-		this.entityData.set(DATA_DANCING, true);
-		return true;
-	}
-
 	@Override
 	public void aiStep() {
 		super.aiStep();

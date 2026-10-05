@@ -3,6 +3,7 @@ package dev.jett.topomod.companion.client;
 import dev.jett.topomod.companion.client.render.BunnayModel;
 import dev.jett.topomod.companion.client.render.BunnayRenderer;
 import dev.jett.topomod.companion.client.render.TopoModel;
+import dev.jett.topomod.companion.client.screen.BunnayScreen;
 import dev.jett.topomod.companion.client.screen.TopoScreen;
 import dev.jett.topomod.companion.client.render.TopoRenderer;
 import dev.jett.topomod.companion.registry.ModEntities;
@@ -23,5 +24,6 @@ public class CompanionModClient implements ClientModInitializer {
 		ModelLayerRegistry.registerModelLayer(BunnayRenderer.LAYER, BunnayModel::createBodyLayer);
 		EntityRendererRegistry.register(ModEntities.BUNNAY, BunnayRenderer::new);
 		MenuScreens.register(ModMenus.TOPO, TopoScreen::new);
+		MenuScreens.register(ModMenus.BUNNAY, BunnayScreen::new);
 	}
 }

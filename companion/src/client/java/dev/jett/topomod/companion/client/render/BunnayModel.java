@@ -21,6 +21,7 @@ import net.minecraft.world.entity.HumanoidArm;
 // the animation under it relies on these part names, so keep them if the model is edited.
 public class BunnayModel extends EntityModel<BunnayRenderState> implements ArmedModel<BunnayRenderState> {
 	private final ModelPart head;
+	private final ModelPart body;
 	private final ModelPart leftArm;
 	private final ModelPart rightArm;
 	private final ModelPart leftLeg;
@@ -31,6 +32,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	public BunnayModel(ModelPart root) {
 		super(root);
 		this.head = root.getChild("head");
+		this.body = root.getChild("body");
 		this.leftArm = root.getChild("left_arm");
 		this.rightArm = root.getChild("right_arm");
 		this.leftLeg = root.getChild("left_leg");
@@ -107,8 +109,13 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		// The player's walk (HumanoidModel): legs swing 1.4 radians and arms 1.0 radian at full speed, each arm
 		// opposite to the leg on its own side.
 		float step = Mth.cos(state.walkAnimationPos * 0.6662F) * state.walkAnimationSpeed;
-		swingLeg(this.rightLeg, step * 1.4F);
-		swingLeg(this.leftLeg, -step * 1.4F);
+		if (state.isSitting) {
+			step = 0.0F;
+			this.animateSit();
+		} else {
+			swingLeg(this.rightLeg, step * 1.4F);
+			swingLeg(this.leftLeg, -step * 1.4F);
+		}
 
 		this.animateArms(state);
 		this.rightArm.xRot = -step;
@@ -282,6 +289,25 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		arm.xRot = Mth.lerp(state.readyProgress, swungPitch, chopPitch);
 		arm.yRot += body.yRot * 2.0F;
 		arm.zRot += Mth.sin(swing * Mth.PI) * -0.4F;
+	}
+
+	/** Sitting: how far the body, head and arms drop (a leg's height, so the bottom rests on the ground). */
+	private static final float SIT_DROP = 2.0F;
+
+	/**
+	 * Sits down: the body, head and arms drop so the bottom rests on the ground, and the legs lie flat, sticking straight
+	 * out in front of the body. A leg pivots at its foot, so turned forward 90 degrees it lies with its top end behind its
+	 * foot; it is moved up half its thickness (so it lies on the ground) and forward (so the feet are in front of the body).
+	 */
+	private void animateSit() {
+		for (ModelPart part : new ModelPart[]{this.body, this.head, this.leftArm, this.rightArm}) {
+			part.y += SIT_DROP;
+		}
+		for (ModelPart leg : new ModelPart[]{this.leftLeg, this.rightLeg}) {
+			leg.xRot = -Mth.HALF_PI;
+			leg.y -= 1.0F;
+			leg.z -= 3.0F;
+		}
 	}
 
 	/** Height of the ground in model space; the dance sways the whole model about the feet. */
