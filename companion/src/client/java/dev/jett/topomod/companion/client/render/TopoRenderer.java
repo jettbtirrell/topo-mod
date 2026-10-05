@@ -33,7 +33,14 @@ public class TopoRenderer extends MobRenderer<TopoEntity, TopoRenderState, TopoM
 		super.extractRenderState(entity, state, partialTicks);
 		ArmedEntityRenderState.extractArmedEntityRenderState(entity, state, this.itemModelResolver, partialTicks);
 		state.sitting = entity.isInSittingPose();
-		state.holdingItem = !state.rightHandItemStack.isEmpty();
+		state.holdingShard = TopoEntity.isAmethystShard(state.rightHandItemStack);
+		if (state.rightHandItemStack.isEmpty()) {
+			state.holdStyle = TopoRenderState.HoldStyle.NONE;
+		} else if (TopoEntity.isTorch(state.rightHandItemStack)) {
+			state.holdStyle = TopoRenderState.HoldStyle.TWO_PAWS;
+		} else {
+			state.holdStyle = TopoRenderState.HoldStyle.ONE_PAW;
+		}
 		state.danceTime = entity.getDanceTime(partialTicks);
 	}
 }

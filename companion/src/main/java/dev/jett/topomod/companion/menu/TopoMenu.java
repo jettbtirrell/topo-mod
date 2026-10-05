@@ -28,7 +28,7 @@ public class TopoMenu extends AbstractContainerMenu {
 		this.equipment = topo.createEquipmentSlotContainer(EquipmentSlot.MAINHAND);
 		this.equipment.startOpen(playerInventory.player);
 
-		this.addSlot(new TorchSlot(this.equipment, 0, 8, 18));
+		this.addSlot(new HeldItemSlot(this.equipment, 0, 8, 18));
 		this.addStandardInventorySlots(playerInventory, 8, 84);
 	}
 
@@ -81,15 +81,15 @@ public class TopoMenu extends AbstractContainerMenu {
 		return original;
 	}
 
-	/** Holds one torch; nothing else fits. */
-	private static final class TorchSlot extends Slot {
-		TorchSlot(Container container, int index, int x, int y) {
+	/** Holds one torch or amethyst shard; nothing else fits. */
+	private static final class HeldItemSlot extends Slot {
+		HeldItemSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
 		}
 
 		@Override
 		public boolean mayPlace(ItemStack stack) {
-			return TopoEntity.isTorch(stack);
+			return TopoEntity.isHoldable(stack);
 		}
 
 		@Override

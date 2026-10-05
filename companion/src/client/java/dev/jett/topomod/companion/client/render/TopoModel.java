@@ -104,6 +104,9 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 	/** How the arms are posed to hold an item between both paws: forward and pulled in together. */
 	private static final float HOLD_PITCH = -0.85F;
 	private static final float HOLD_INWARD = 0.75F;
+	/** Right arm pose when holding an item in one paw. */
+	private static final float ONE_PAW_PITCH = -1.175F;   // forward and up (about 67 degrees)
+	private static final float ONE_PAW_OUTWARD = 0.725F;  // away from the body (about 41 degrees)
 
 	@Override
 	public void setupAnim(TopoRenderState state) {
@@ -119,7 +122,7 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 
 		boolean dancing = state.danceTime >= 0.0F && !state.sitting;
 		if (dancing) {
-			this.animateDance(state.danceTime, state.holdingItem);
+			this.animateDance(state.danceTime, state.holdStyle);
 		} else if (state.sitting) {
 			// Plop down: the body, head and arms drop 2px so the bottom rests on the ground.
 			for (ModelPart part : new ModelPart[]{this.body, this.head, this.leftArm, this.rightArm}) {
@@ -134,23 +137,37 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 			}
 			this.tail.xRot = 0.5F;
 			this.tail.y -= 0.5F;
-			if (state.holdingItem) {
+			if (state.holdStyle == TopoRenderState.HoldStyle.TWO_PAWS) {
 				this.poseArmsHolding();
 			} else {
 				this.leftArm.xRot = -0.8F;
-				this.rightArm.xRot = -0.8F;
+				if (state.holdStyle == TopoRenderState.HoldStyle.ONE_PAW) {
+					this.poseRightArmHolding();
+				} else {
+					this.rightArm.xRot = -0.8F;
+				}
 			}
 		} else {
 			float swing = Mth.cos(state.walkAnimationPos * 0.8F) * 0.9F * state.walkAnimationSpeed;
 			swingLeg(this.leftLeg, swing);
 			swingLeg(this.rightLeg, -swing);
-			if (state.holdingItem) {
+			if (state.holdStyle == TopoRenderState.HoldStyle.TWO_PAWS) {
 				this.poseArmsHolding();
 			} else {
 				this.leftArm.xRot = -swing * 0.7F;
-				this.rightArm.xRot = swing * 0.7F;
+				if (state.holdStyle == TopoRenderState.HoldStyle.ONE_PAW) {
+					this.poseRightArmHolding();
+				} else {
+					this.rightArm.xRot = swing * 0.7F;
+				}
 			}
 		}
+	}
+
+	/** Holding something out in just the right paw: forward and a little away from the body. */
+	private void poseRightArmHolding() {
+		this.rightArm.xRot = ONE_PAW_PITCH;
+		this.rightArm.zRot = ONE_PAW_OUTWARD;
 	}
 
 	private void poseArmsHolding() {
@@ -162,9 +179,9 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 
 	/**
 	 * Victory dance: spins twice while hopping, with ears and tail flapping. The arms stick out to the
-	 * sides and wiggle up and down, or stay in front holding the item if there is one.
+	 * sides and wiggle up and down. An arm holding an item stays in front holding it instead.
 	 */
-	private void animateDance(float t, boolean holdingItem) {
+	private void animateDance(float t, TopoRenderState.HoldStyle holdStyle) {
 		float length = TopoEntity.DANCE_LENGTH;
 		// Ease the motion in and out so it doesn't snap at the start or end.
 		float amp = Mth.clamp(Math.min(t, length - t) / 6.0F, 0.0F, 1.0F);
@@ -173,14 +190,18 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 		this.root.yRot = Mth.TWO_PI * 2.0F * (t / length);
 		this.root.y -= Math.abs(Mth.sin(t * 0.35F)) * 2.5F * amp;
 
-		if (holdingItem) {
+		if (holdStyle == TopoRenderState.HoldStyle.TWO_PAWS) {
 			this.poseArmsHolding();
 		} else {
 			// -PI/2 is straight out to the side. Centered a little below that with a smaller swing upward,
 			// so the shoulders never lift an arm into the (wide) head sitting just above them.
 			float flap = -1.35F + Mth.sin(t * 0.7F) * 0.5F * amp;
 			this.leftArm.zRot = flap;
-			this.rightArm.zRot = -flap;
+			if (holdStyle == TopoRenderState.HoldStyle.ONE_PAW) {
+				this.poseRightArmHolding();
+			} else {
+				this.rightArm.zRot = -flap;
+			}
 		}
 
 		this.head.zRot = Mth.sin(t * 0.4F) * 0.12F * amp;
@@ -206,6 +227,13 @@ public class TopoModel extends EntityModel<TopoRenderState> {
 		Vector3f left = armTip(this.leftArm);
 		Vector3f right = armTip(this.rightArm);
 		poseStack.translate((left.x + right.x) / 32.0F, (left.y + right.y) / 32.0F, (left.z + right.z) / 32.0F);
+	}
+
+	/** Moves the pose stack to the right paw's grip point, for items held in one paw. */
+	public void translateToRightPaw(PoseStack poseStack) {
+		this.root.translateAndRotate(poseStack);
+		Vector3f tip = armTip(this.rightArm);
+		poseStack.translate(tip.x / 16.0F, tip.y / 16.0F, tip.z / 16.0F);
 	}
 
 	private static Vector3f armTip(ModelPart arm) {

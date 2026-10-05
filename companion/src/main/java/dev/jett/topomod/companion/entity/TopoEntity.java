@@ -1,9 +1,15 @@
 package dev.jett.topomod.companion.entity;
 
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
+import java.util.UUID;
 
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.BlockParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -12,17 +18,23 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.TopoMenu;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
@@ -40,12 +52,17 @@ import net.minecraft.world.entity.ai.goal.target.OwnerHurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.jspecify.annotations.Nullable;
 
@@ -58,6 +75,36 @@ public class TopoEntity extends TamableAnimal {
 	/** Max health while wild, and once tamed (like wolves, taming also fully heals). */
 	private static final double WILD_HEALTH = 10.0;
 	private static final double TAME_HEALTH = 40.0;
+	/** Extra damage per hit while holding an amethyst shard (on top of the base attack). */
+	private static final double SHARD_BONUS_DAMAGE = 3.0;
+	private static final Identifier SHARD_DAMAGE_ID = CompanionMod.id("amethyst_shard_damage");
+
+	// Resonance combo (amethyst shard): hits on one target in quick succession climb a musical scale,
+	// and the SHATTER_AT-th hit shatters for bonus damage and knockback.
+	private static final int SHATTER_AT = 4;
+	private static final double SHATTER_BONUS_DAMAGE = 4.0;
+	/** Ticks the combo survives between hits. */
+	private static final int COMBO_WINDOW = 60;
+	/** Semitones above the base pitch for each step of the combo (a major pentatonic scale). */
+	private static final int[] COMBO_SCALE = {0, 2, 4, 7, 9};
+	/**
+	 * Volume of the amethyst sounds. Above 1.0 this does not make them louder, it makes them carry
+	 * further: they can be heard (volume x 16) blocks away.
+	 */
+	private static final float CHIME_VOLUME = 3.0F;
+	/** Pitch multipliers for the layered clink: one copy per entry, so more entries means louder. */
+	private static final float[] CLINK_DETUNE = {0.97F, 1.0F, 1.03F};
+
+	// Ender pearl: a hit sends the target at most this far from the topo (straight-line distance), in a random direction.
+	private static final double PEARL_MAX_DISTANCE = 10.0;
+	/** How long the topo keeps a teleported target even when it is out of range, in ticks. */
+	private static final int PEARL_KEEP_TARGET_TICKS = 200;
+	/** Chance a pearl hit instead launches the target up through the air (if there is room). */
+	private static final double PEARL_SKY_CHANCE = 0.10;
+	/** An air launch is still PEARL_MAX_DISTANCE away, aimed upward at an angle in this range (degrees above flat). */
+	private static final double PEARL_SKY_MIN_ELEVATION = 35.0;
+	private static final double PEARL_SKY_MAX_ELEVATION = 70.0;
+
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(TopoEntity.class, EntityDataSerializers.BOOLEAN);
 
@@ -70,6 +117,16 @@ public class TopoEntity extends TamableAnimal {
 	/** The last mob this topo hit, and when to stop caring about it (server only). */
 	private @Nullable LivingEntity lastVictim;
 	private int lastVictimExpiresAt;
+
+	/** The mob a pearl hit just sent away, and how long the topo keeps hold of it as its target (server only). */
+	private @Nullable LivingEntity pearlTarget;
+	private int pearlTargetUntil;
+
+	private @Nullable UUID comboTarget;
+	private int comboCount;
+	private int comboExpiresAt;
+
+
 
 	public TopoEntity(EntityType<? extends TopoEntity> type, Level level) {
 		super(type, level);
@@ -85,8 +142,36 @@ public class TopoEntity extends TamableAnimal {
 		return stack.is(Items.TORCH) || stack.is(Items.SOUL_TORCH);
 	}
 
+	public static boolean isAmethystShard(ItemStack stack) {
+		return stack.is(Items.AMETHYST_SHARD);
+	}
+
+	public static boolean isEnderPearl(ItemStack stack) {
+		return stack.is(Items.ENDER_PEARL);
+	}
+
+	/** Anything the topo can hold in its paws. */
+	public static boolean isHoldable(ItemStack stack) {
+		return isTorch(stack) || isAmethystShard(stack) || isEnderPearl(stack);
+	}
+
+	// Mobs spawn left-handed 5% of the time (and that is saved), which would put the held item in the left
+	// paw. The model and held item layer only handle the right paw, so every topo is right-handed.
+	@Override
+	public HumanoidArm getMainArm() {
+		return HumanoidArm.RIGHT;
+	}
+
 	public boolean isHoldingTorch() {
 		return isTorch(this.getMainHandItem());
+	}
+
+	public boolean isHoldingAmethystShard() {
+		return isAmethystShard(this.getMainHandItem());
+	}
+
+	public boolean isHoldingEnderPearl() {
+		return isEnderPearl(this.getMainHandItem());
 	}
 
 	public boolean isDancing() {
@@ -138,6 +223,21 @@ public class TopoEntity extends TamableAnimal {
 		}
 	}
 
+	// Ignore attempts to clear the target while a pearl-teleported mob is still its target (see onPearlHit).
+	@Override
+	public void setTarget(@Nullable LivingEntity target) {
+		if (target == null
+			&& this.pearlTarget != null
+			&& this.getTarget() == this.pearlTarget
+			&& this.pearlTarget.isAlive()
+			&& this.tickCount < this.pearlTargetUntil
+			&& this.isHoldingEnderPearl()
+			&& !this.isOrderedToSit()) {
+			return;
+		}
+		super.setTarget(target);
+	}
+
 	// A burning zombie that hits the topo would set it alight too, so a topo holding a torch ignores fire.
 	@Override
 	public void setRemainingFireTicks(int remainingTicks) {
@@ -158,16 +258,178 @@ public class TopoEntity extends TamableAnimal {
 
 	@Override
 	public boolean doHurtTarget(ServerLevel level, Entity target) {
-		boolean hit = super.doHurtTarget(level, target);
+		boolean shard = this.isHoldingAmethystShard();
+
+		// Resonance combo: which hit in the chain is this? Every hit on the same target within the window adds one.
+		int comboStep = 0;
+		boolean shatter = false;
+		if (shard && target instanceof LivingEntity) {
+			boolean continuing = target.getUUID().equals(this.comboTarget) && this.tickCount <= this.comboExpiresAt;
+			comboStep = continuing ? this.comboCount + 1 : 1;
+			shatter = comboStep >= SHATTER_AT;
+		}
+
+		// The shard has no attack stat of its own, so add its bonus just for this swing.
+		double bonus = shard ? SHARD_BONUS_DAMAGE + (shatter ? SHATTER_BONUS_DAMAGE : 0.0) : 0.0;
+		AttributeInstance attack = this.getAttribute(Attributes.ATTACK_DAMAGE);
+		if (bonus > 0.0) {
+			attack.addTransientModifier(new AttributeModifier(SHARD_DAMAGE_ID, bonus, AttributeModifier.Operation.ADD_VALUE));
+		}
+		boolean hit;
+		try {
+			hit = super.doHurtTarget(level, target);
+		} finally {
+			if (bonus > 0.0) {
+				attack.removeModifier(SHARD_DAMAGE_ID);
+			}
+		}
+
 		if (hit && target instanceof LivingEntity victim) {
 			this.lastVictim = victim;
 			// Long enough for a burning mob to die after the last hit.
 			this.lastVictimExpiresAt = this.tickCount + 200;
+
+			if (shard) {
+				this.onShardHit(level, victim, comboStep, shatter);
+			}
+			if (this.isHoldingEnderPearl()) {
+				this.onPearlHit(level, victim);
+			}
 		}
 		if (hit && this.isHoldingTorch()) {
 			target.igniteForTicks(TORCH_FIRE_TICKS);
 		}
 		return hit;
+	}
+
+	/** Chimes up the scale, and shatters on the last step of the combo. */
+	private void onShardHit(ServerLevel level, LivingEntity victim, int comboStep, boolean shatter) {
+		double x = victim.getX();
+		double y = victim.getY() + victim.getBbHeight() / 2.0;
+		double z = victim.getZ();
+
+		float pitch = 0.9F * (float) Math.pow(2.0, COMBO_SCALE[Math.min(comboStep, COMBO_SCALE.length) - 1] / 12.0);
+		level.playSound(null, x, y, z, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.NEUTRAL, CHIME_VOLUME, Math.min(pitch, 2.0F));
+		// A fifth above it makes the chime fuller and easier to hear.
+		level.playSound(null, x, y, z, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.NEUTRAL, CHIME_VOLUME, Math.min(pitch * 1.5F, 2.0F));
+		// The chime above is a very quiet file, and a volume over 1.0 only widens the range, so to bring the normal
+		// hit sounds up toward the burst's loudness the clink is layered a few times (slightly detuned so the copies
+		// don't cancel each other), with the resonating ring of the amethyst blocks underneath for a tone.
+		for (float detune : CLINK_DETUNE) {
+			level.playSound(null, x, y, z, SoundEvents.AMETHYST_CLUSTER_HIT, SoundSource.NEUTRAL, CHIME_VOLUME, pitch * detune);
+		}
+		level.playSound(null, x, y, z, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.NEUTRAL, CHIME_VOLUME, Math.min(pitch, 2.0F));
+		level.playSound(null, x, y, z, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.NEUTRAL, CHIME_VOLUME, Math.min(pitch * 1.5F, 2.0F));
+		level.sendParticles(ParticleTypes.WITCH, x, y, z, 6, 0.25, 0.3, 0.25, 0.02);
+
+		if (shatter) {
+			this.comboTarget = null;
+			this.comboCount = 0;
+			level.playSound(null, x, y, z, SoundEvents.AMETHYST_BLOCK_BREAK, SoundSource.NEUTRAL, CHIME_VOLUME, 1.2F);
+			level.playSound(null, x, y, z, SoundEvents.AMETHYST_CLUSTER_BREAK, SoundSource.NEUTRAL, CHIME_VOLUME, 1.0F);
+			level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, Blocks.AMETHYST_BLOCK.defaultBlockState()), x, y, z, 30, 0.35, 0.45, 0.35, 0.15);
+			victim.knockback(0.9, this.getX() - victim.getX(), this.getZ() - victim.getZ(), this.damageSources().mobAttack(this), 0.0F);
+		} else {
+			this.comboTarget = victim.getUUID();
+			this.comboCount = comboStep;
+			this.comboExpiresAt = this.tickCount + COMBO_WINDOW;
+		}
+	}
+
+	/**
+	 * Sends the target up to 10 blocks away in a random direction, or occasionally up into the air, never more than 10 blocks from the topo, then
+	 * switches to a closer enemy that is attacking the owner, if there is one.
+	 */
+	private void onPearlHit(ServerLevel level, LivingEntity victim) {
+		if (victim instanceof Player) {
+			return;
+		}
+
+		LivingEntity owner = this.getOwner();
+		Vec3 from = victim.position();
+		boolean moved = this.random.nextDouble() < PEARL_SKY_CHANCE && this.teleportIntoAir(level, victim);
+		if (!moved) {
+			moved = this.teleportAround(victim);
+		}
+		if (!moved) {
+			return;
+		}
+
+		level.broadcastEntityEvent(victim, (byte) 46);
+		level.playSound(null, from.x, from.y, from.z, SoundEvents.ENDERMAN_TELEPORT, SoundSource.NEUTRAL, 1.0F, 1.0F);
+		level.playSound(null, victim.getX(), victim.getY(), victim.getZ(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.NEUTRAL, 1.0F, 1.0F);
+		level.sendParticles(ParticleTypes.PORTAL, from.x, from.y + 0.5, from.z, 25, 0.3, 0.5, 0.3, 0.3);
+
+		// Keep this mob as the target while it is sent away or falling out of the sky. Target goals normally give
+		// up on anything beyond the 16-block follow range, and a sky launch puts it about 21 blocks away.
+		this.pearlTarget = victim;
+		this.pearlTargetUntil = this.tickCount + PEARL_KEEP_TARGET_TICKS;
+
+		// Stay on the same target, unless there is an enemy closer to the owner that is going for the owner.
+		if (owner != null) {
+			double victimDistance = victim.distanceToSqr(owner);
+			List<Mob> threats = level.getEntitiesOfClass(
+				Mob.class,
+				owner.getBoundingBox().inflate(16.0),
+				mob -> mob != victim && mob != this && mob instanceof Enemy && mob.isAlive() && mob.getTarget() == owner
+					&& mob.distanceToSqr(owner) < victimDistance && this.wantsToAttack(mob, owner)
+			);
+			threats.sort(Comparator.comparingDouble(mob -> mob.distanceToSqr(owner)));
+			if (!threats.isEmpty()) {
+				this.setTarget(threats.get(0));
+			}
+		}
+	}
+
+	/**
+	 * Finds ground up to 10 blocks (straight-line) from the topo, in a random direction, trying shorter if that is
+	 * blocked. Minecraft's own ground search can drop a target far down a cliff or into a cave, so a landing spot
+	 * that ends up farther than the limit is undone and another is tried.
+	 */
+	private boolean teleportAround(LivingEntity victim) {
+		Vec3 from = victim.position();
+		double[] distances = {PEARL_MAX_DISTANCE * 0.95, PEARL_MAX_DISTANCE * 0.65, PEARL_MAX_DISTANCE * 0.35};
+		for (double distance : distances) {
+			for (int attempt = 0; attempt < 10; attempt++) {
+				double angle = this.random.nextDouble() * Math.PI * 2.0;
+				// Start above the topo's height so slopes are fine; the target settles down onto the ground.
+				if (victim.randomTeleport(
+					this.getX() + Math.cos(angle) * distance, this.getY() + 4.0, this.getZ() + Math.sin(angle) * distance, false, state -> false
+				)) {
+					if (victim.distanceTo(this) <= PEARL_MAX_DISTANCE + 0.25) {
+						return true;
+					}
+					victim.teleportTo(from.x, from.y, from.z);
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Puts the target 10 blocks away at most, up in the air in a random direction, if there is room to fit it. */
+	private boolean teleportIntoAir(ServerLevel level, LivingEntity victim) {
+		for (int attempt = 0; attempt < 8; attempt++) {
+			double angle = this.random.nextDouble() * Math.PI * 2.0;
+			double elevation = Math.toRadians(
+				PEARL_SKY_MIN_ELEVATION + this.random.nextDouble() * (PEARL_SKY_MAX_ELEVATION - PEARL_SKY_MIN_ELEVATION)
+			);
+			double sideways = Math.cos(elevation) * PEARL_MAX_DISTANCE;
+			double x = this.getX() + Math.cos(angle) * sideways;
+			double y = this.getY() + Math.sin(elevation) * PEARL_MAX_DISTANCE;
+			double z = this.getZ() + Math.sin(angle) * sideways;
+			if (y + victim.getBbHeight() >= level.getMaxY() || !level.hasChunkAt(BlockPos.containing(x, y, z))) {
+				continue;
+			}
+			AABB box = victim.getDimensions(victim.getPose()).makeBoundingBox(x, y, z);
+			if (level.noCollision(box) && !level.containsAnyLiquid(box)) {
+				victim.teleportTo(x, y, z);
+				if (victim instanceof Mob mob) {
+					mob.getNavigation().stop();
+				}
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public static AttributeSupplier.Builder createAttributes() {
@@ -215,8 +477,8 @@ public class TopoEntity extends TamableAnimal {
 					return InteractionResult.SUCCESS;
 				}
 
-				// Handing it a torch equips it straight away.
-				if (isTorch(stack) && this.getMainHandItem().isEmpty()) {
+				// Handing it a torch, amethyst shard or ender pearl equips it straight away.
+				if (isHoldable(stack) && this.getMainHandItem().isEmpty()) {
 					if (!this.level().isClientSide()) {
 						this.setItemSlot(EquipmentSlot.MAINHAND, stack.split(1));
 						this.setGuaranteedDrop(EquipmentSlot.MAINHAND);
