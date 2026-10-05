@@ -91,12 +91,12 @@ public class TopoEntity extends TamableAnimal {
 	public static final int IDLE_SHAKE = 4;
 	public static final int IDLE_HOP = 5;
 	/**
-	 * Tuning for how often an idle animation starts. After the pause, a standing-still topo starts one with a
-	 * 1-in-IDLE_ODDS chance each tick: with these numbers a topo that stays idle does one about every 45 seconds
-	 * (a 15 second pause plus 30 seconds on average). Lower both to see them more often while testing.
+	 * Only grooming is enabled; the other idle animations are still in the model but are never picked
+	 * (the debug command can still play them). Like the copper golem's idle, one starts a fixed wait after the last
+	 * one ended: IDLE_PAUSE_MIN to IDLE_PAUSE_MIN + IDLE_PAUSE_RANGE ticks (10 to 12 seconds) of standing still.
 	 */
-	private static final int IDLE_PAUSE_TICKS = 300;
-	private static final int IDLE_ODDS = 600;
+	private static final int IDLE_PAUSE_MIN = 200;
+	private static final int IDLE_PAUSE_RANGE = 40;
 
 	/** Length of an idle animation in ticks. */
 	public static int idleLength(int style) {
@@ -166,7 +166,7 @@ public class TopoEntity extends TamableAnimal {
 
 	/** Same idea for idle animations: each side counts its own elapsed ticks, and the server decides when they end. */
 	private int idleElapsed;
-	private int idlePause = IDLE_PAUSE_TICKS / 2;
+	private int idlePause = IDLE_PAUSE_MIN / 2;
 
 	/** The last mob this topo hit, and when to stop caring about it (server only). */
 	private @Nullable LivingEntity lastVictim;
@@ -273,6 +273,28 @@ public class TopoEntity extends TamableAnimal {
 		}
 	}
 
+	// DEBUG: used by TopoDebugCommand to preview animations on demand. Remove together with that command.
+	/** Starts the given idle animation right now (server side). Returns false if one is already playing. */
+	public boolean debugPlayIdle(int style) {
+		if (this.getIdleStyle() != IDLE_NONE) {
+			return false;
+		}
+		this.idleElapsed = 0;
+		this.entityData.set(DATA_IDLE_STYLE, style);
+		return true;
+	}
+
+	// DEBUG: see debugPlayIdle. Returns false if a dance is already playing.
+	public boolean debugPlayDance(int style) {
+		if (this.isDancing()) {
+			return false;
+		}
+		this.danceElapsed = 0;
+		this.entityData.set(DATA_DANCE_STYLE, style);
+		this.entityData.set(DATA_DANCING, true);
+		return true;
+	}
+
 	@Override
 	public void aiStep() {
 		super.aiStep();
@@ -327,7 +349,7 @@ public class TopoEntity extends TamableAnimal {
 		this.idleElapsed = 0;
 		if (this.idlePause > 0) {
 			this.idlePause--;
-		} else if (this.canIdle() && this.random.nextInt(IDLE_ODDS) == 0) {
+		} else if (this.canIdle()) {
 			this.startIdle();
 		}
 	}
@@ -348,18 +370,18 @@ public class TopoEntity extends TamableAnimal {
 	}
 
 	private void startIdle() {
-		// Grooming needs both paws free to wash its face.
-		int style = this.getMainHandItem().isEmpty()
-			? 1 + this.random.nextInt(5)
-			: new int[]{IDLE_LOOK_AROUND, IDLE_TAIL_CHASE, IDLE_SHAKE, IDLE_HOP}[this.random.nextInt(4)];
+		// Grooming needs both paws free to wash its face, so a topo holding something has no idle at all.
+		if (!this.getMainHandItem().isEmpty()) {
+			return;
+		}
 		this.idleElapsed = 0;
-		this.entityData.set(DATA_IDLE_STYLE, style);
+		this.entityData.set(DATA_IDLE_STYLE, IDLE_GROOM);
 	}
 
 	private void stopIdle() {
 		this.entityData.set(DATA_IDLE_STYLE, IDLE_NONE);
 		this.idleElapsed = 0;
-		this.idlePause = IDLE_PAUSE_TICKS;
+		this.idlePause = IDLE_PAUSE_MIN + this.random.nextInt(IDLE_PAUSE_RANGE);
 	}
 
 	// Ignore attempts to clear the target while a pearl-teleported mob is still its target (see onPearlHit).
