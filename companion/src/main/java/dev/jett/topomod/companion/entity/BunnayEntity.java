@@ -97,9 +97,13 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int IDLE_EXTRA_TICKS = 40;
 
 	// Fighting with something in its right hand: each hit does a little extra damage. A bamboo is plain extra damage;
-	// a breeze rod does less, but every hit also blasts the foe the way a wind charge would.
+	// a breeze rod does less, but every hit also blasts the foe the way a wind charge would; a blaze rod does less too,
+	// but every hit sets the foe on fire. Holding a blaze rod does not protect the bunnay from fire in any way.
 	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
 	private static final double BREEZE_ROD_BONUS_DAMAGE = 1.0;
+	private static final double BLAZE_ROD_BONUS_DAMAGE = 1.0;
+	/** How long a hit with a blaze rod keeps a foe burning, in ticks (4 seconds; the topo's torch is 5). */
+	private static final int BLAZE_ROD_FIRE_TICKS = 80;
 	private static final Identifier WEAPON_DAMAGE_ID = CompanionMod.id("weapon_damage");
 	/** The wind burst's shove on a foe: this fast away from the bunnay, and this fast straight up (0.9 is about 4 blocks of height). */
 	private static final double WIND_BURST_HORIZONTAL = 0.5;
@@ -286,6 +290,10 @@ public class BunnayEntity extends TamableAnimal {
 		return this.getMainHandItem().is(Items.BREEZE_ROD);
 	}
 
+	public boolean isHoldingBlazeRod() {
+		return this.getMainHandItem().is(Items.BLAZE_ROD);
+	}
+
 	/** Extra damage per hit from what it is holding (neither item has an attack stat of its own). */
 	private static double weaponBonusDamage(ItemStack stack) {
 		if (stack.is(Items.BAMBOO)) {
@@ -293,6 +301,9 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		if (stack.is(Items.BREEZE_ROD)) {
 			return BREEZE_ROD_BONUS_DAMAGE;
+		}
+		if (stack.is(Items.BLAZE_ROD)) {
+			return BLAZE_ROD_BONUS_DAMAGE;
 		}
 		return 0.0;
 	}
@@ -341,6 +352,9 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		if (hit && target instanceof LivingEntity victim && this.isHoldingBreezeRod()) {
 			this.windBurst(level, victim);
+		}
+		if (hit && this.isHoldingBlazeRod()) {
+			target.igniteForTicks(BLAZE_ROD_FIRE_TICKS);
 		}
 		return hit;
 	}
@@ -500,9 +514,9 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
-	/** Anything the bunnay can hold in its main hand as a weapon: a bamboo or a breeze rod. */
+	/** Anything the bunnay can hold in its main hand as a weapon: a bamboo, a breeze rod or a blaze rod. */
 	public static boolean isHoldable(ItemStack stack) {
-		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD);
+		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD);
 	}
 
 	@Override
