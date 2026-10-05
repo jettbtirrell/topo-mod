@@ -70,14 +70,10 @@ import org.jspecify.annotations.Nullable;
 public class TopoEntity extends TamableAnimal {
 	/** Length of the victory dance in ticks. The renderer uses this to time the animation. */
 	public static final int DANCE_LENGTH = 50;
-	/** The dances a topo can do; one is picked at random each time. The renderer plays the matching animation. */
+	/** The dances a topo can do. The renderer plays the matching animation. */
 	public static final int DANCE_SPIN = 0;
 	public static final int DANCE_BACKFLIP = 1;
 	public static final int DANCE_MOONWALK = 2;
-	/** Relative odds of each dance: 70% the main spin, 20% the moonwalk, 10% the backflip. */
-	private static final int DANCE_SPIN_WEIGHT = 70;
-	private static final int DANCE_MOONWALK_WEIGHT = 20;
-	private static final int DANCE_BACKFLIP_WEIGHT = 10;
 	private static final int BACKFLIP_LENGTH = 50;
 	private static final int MOONWALK_LENGTH = 70;
 	/** How fast the moonwalk glides backward, in blocks per tick. */
@@ -230,13 +226,12 @@ public class TopoEntity extends TamableAnimal {
 		return isEnderPearl(this.getMainHandItem());
 	}
 
-	/** Picks a dance at random: the main spin dance most of the time, the moonwalk now and then, the backflip rarely. */
+	/**
+	 * Only the spin dance is enabled for kills. The backflip and moonwalk are still in the model and can be
+	 * previewed with the debug command, but are never picked here.
+	 */
 	private int pickDanceStyle() {
-		int roll = this.random.nextInt(DANCE_SPIN_WEIGHT + DANCE_MOONWALK_WEIGHT + DANCE_BACKFLIP_WEIGHT);
-		if (roll < DANCE_SPIN_WEIGHT) {
-			return DANCE_SPIN;
-		}
-		return roll < DANCE_SPIN_WEIGHT + DANCE_MOONWALK_WEIGHT ? DANCE_MOONWALK : DANCE_BACKFLIP;
+		return DANCE_SPIN;
 	}
 
 	/** Which idle animation is playing (one of the IDLE_ constants), or IDLE_NONE. */
