@@ -103,7 +103,7 @@ public class BunnayMenu extends AbstractContainerMenu {
 		return original;
 	}
 
-	/** Holds one weapon (a bamboo, a breeze rod, a blaze rod, a stick or a bone); nothing else fits. Shows a rod outline when empty. */
+	/** Holds one weapon (a bamboo, a rod, a stick or a bone), or a stack of arrows; nothing else fits. Shows a rod outline when empty. */
 	private static final class WeaponSlot extends Slot {
 		WeaponSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
@@ -114,9 +114,15 @@ public class BunnayMenu extends AbstractContainerMenu {
 			return BunnayEntity.isHoldable(stack);
 		}
 
+		// A weapon is one item, but a hand can hold a stack of arrows (each hit with one uses it up).
 		@Override
 		public int getMaxStackSize() {
-			return 1;
+			return 64;
+		}
+
+		@Override
+		public int getMaxStackSize(ItemStack stack) {
+			return BunnayEntity.isArrow(stack) ? stack.getMaxStackSize() : 1;
 		}
 
 		@Override

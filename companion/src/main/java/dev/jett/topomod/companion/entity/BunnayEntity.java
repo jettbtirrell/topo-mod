@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
@@ -56,6 +57,7 @@ import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
 import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.BunnayMenu;
 import net.minecraft.world.level.Level;
@@ -103,11 +105,14 @@ public class BunnayEntity extends TamableAnimal {
 	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, a stick or a bone
 	// +1. A breeze rod also blasts the foe the way a wind charge would; a blaze rod also does what a blaze's small
 	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way); a bone also
-	// knocks the foe back a little further. All of them swing at the same pace.
+	// knocks the foe back a little further; an arrow does +1, and a tipped arrow also gives the foe its potion effects, good
+	// ones too (see applyArrowEffects). Arrows are ammo: each hit that lands uses one up, so a hand can hold a stack of them
+	// (the others are one item). All of them swing at the same pace.
 	private static final double ROD_BONUS_DAMAGE = 2.0;
 	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
 	private static final double STICK_BONUS_DAMAGE = 1.0;
 	private static final double BONE_BONUS_DAMAGE = 1.0;
+	private static final double ARROW_BONUS_DAMAGE = 1.0;
 	/**
 	 * The extra shove a bone's hit gives, on top of the hit's own knockback (a mob's melee hit pushes with strength 0.4, so
 	 * 0.3 is about three quarters again as far). Raise it for a heavier hit.
@@ -386,6 +391,9 @@ public class BunnayEntity extends TamableAnimal {
 		if (stack.is(Items.BONE)) {
 			return BONE_BONUS_DAMAGE;
 		}
+		if (isArrow(stack)) {
+			return ARROW_BONUS_DAMAGE;
+		}
 		return 0.0;
 	}
 
@@ -401,6 +409,19 @@ public class BunnayEntity extends TamableAnimal {
 		level.sendParticles(ParticleTypes.FLAME, target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(), 14, 0.25, 0.3, 0.25, 0.03);
 		level.sendParticles(ParticleTypes.SMOKE, target.getX(), target.getY() + target.getBbHeight() * 0.6, target.getZ(), 6, 0.2, 0.3, 0.2, 0.02);
 		level.playSound(null, target.getX(), target.getY(), target.getZ(), SoundEvents.FIRECHARGE_USE, SoundSource.NEUTRAL, 1.0F, 1.0F);
+	}
+
+	/**
+	 * Gives a foe the potion effects of a tipped arrow it hit with, the way a fired arrow would: each effect lasts as long
+	 * as the arrow item says (the tipped arrow's own duration scale, which is a eighth of the potion's), instant effects
+	 * happen at once, and the arrow's source is the bunnay. A fired arrow gives them to whatever it hits, so the good ones
+	 * too: an arrow of healing heals the foe and one of regeneration makes it regenerate. The hit also uses the arrow up (see
+	 * doHurtTarget), which is what keeps an arrow of harming from being the best weapon there is.
+	 */
+	private void applyArrowEffects(ItemStack arrow, LivingEntity victim) {
+		PotionContents contents = arrow.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
+		float durationScale = arrow.getOrDefault(DataComponents.POTION_DURATION_SCALE, 1.0F);
+		contents.forEachEffect(effect -> victim.addEffect(effect, this), durationScale);
 	}
 
 	/**
@@ -451,6 +472,16 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		if (hit && weapon.is(Items.BLAZE_ROD)) {
 			this.fireballHit(level, target);
+		}
+		if (hit && weapon.is(Items.TIPPED_ARROW) && target instanceof LivingEntity victim) {
+			this.applyArrowEffects(weapon, victim);
+		}
+		if (hit && isArrow(weapon)) {
+			// A hit uses an arrow up, after its effects have been given; the hand is empty when the last one goes.
+			weapon.shrink(1);
+			if (weapon.isEmpty()) {
+				this.setItemSlot(this.attackHand == InteractionHand.MAIN_HAND ? EquipmentSlot.MAINHAND : EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+			}
 		}
 		if (hit && weapon.is(Items.BONE) && target instanceof LivingEntity victim) {
 			victim.knockback(BONE_EXTRA_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), this.damageSources().mobAttack(this), 0.0F);
@@ -621,10 +652,18 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
-	/** Anything the bunnay can hold in a hand as a weapon: a bamboo, a breeze rod, a blaze rod, a stick or a bone. */
+	/** An arrow or a tipped arrow: the weapons that are used up, one per hit, and that a hand can hold a stack of. */
+	public static boolean isArrow(ItemStack stack) {
+		return stack.is(Items.ARROW) || stack.is(Items.TIPPED_ARROW);
+	}
+
+	/**
+	 * Anything the bunnay can hold in a hand as a weapon: a bamboo, a breeze rod, a blaze rod, a stick, a bone, an arrow
+	 * or a tipped arrow.
+	 */
 	public static boolean isHoldable(ItemStack stack) {
 		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD)
-			|| stack.is(Items.STICK) || stack.is(Items.BONE);
+			|| stack.is(Items.STICK) || stack.is(Items.BONE) || stack.is(Items.ARROW) || stack.is(Items.TIPPED_ARROW);
 	}
 
 	@Override
@@ -648,7 +687,7 @@ public class BunnayEntity extends TamableAnimal {
 			if (isHoldable(stack) && (this.getMainHandItem().isEmpty() || this.getOffhandItem().isEmpty())) {
 				if (!this.level().isClientSide()) {
 					EquipmentSlot slot = this.getMainHandItem().isEmpty() ? EquipmentSlot.MAINHAND : EquipmentSlot.OFFHAND;
-					this.setItemSlot(slot, stack.split(1));
+					this.setItemSlot(slot, stack.split(isArrow(stack) ? stack.getCount() : 1));
 					this.setGuaranteedDrop(slot);
 					this.setPersistenceRequired();
 				}
