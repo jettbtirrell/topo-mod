@@ -247,17 +247,13 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	}
 
 	/**
-	 * Everything that only happens when the bunnay is armed, for either hand. An arm holding a weapon holds it with the
-	 * player's pose (tilted forward a little and swinging half as much), raises into a ready stance while it closes on a
-	 * target, and swings when it attacks; with a weapon in each hand they swing in turn. An unarmed bunnay is left exactly
-	 * as the rest of setupAnim made it. The left hand holds a carrot, not a weapon, while it eats.
+	 * Combat poses, for either hand. An arm holding a weapon holds it with the player's pose (tilted forward a little and
+	 * swinging half as much) and raises into a ready stance while it closes on a target. Either arm, armed or not, swings
+	 * when it attacks: the hands swing in turn. The left hand holds a carrot, not a weapon, while it eats.
 	 */
 	private void animateCombat(BunnayRenderState state) {
 		boolean rightArmed = !state.rightHandItemState.isEmpty();
 		boolean leftArmed = !state.leftHandItemState.isEmpty() && state.eatProgress <= 0.0F;
-		if (!rightArmed && !leftArmed) {
-			return;
-		}
 
 		if (rightArmed) {
 			this.poseArmedArm(this.rightArm, state.readyProgress, READY_YAW);
@@ -265,7 +261,8 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		if (leftArmed) {
 			this.poseArmedArm(this.leftArm, state.readyProgress, -READY_YAW);
 		}
-		this.applyAttackSwing(state, rightArmed, leftArmed);
+		// Either arm swings, with something in the hand or not: it always swings its two hands in turn.
+		this.applyAttackSwing(state);
 	}
 
 	/**
@@ -286,16 +283,12 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	 * arm whips up and over and back, driven by the attack progress. The only change is that the shoulders are 2.5px
 	 * from the body's center here, not the player's 5.
 	 */
-	private void applyAttackSwing(BunnayRenderState state, boolean rightArmed, boolean leftArmed) {
+	private void applyAttackSwing(BunnayRenderState state) {
 		float swing = state.swingAnimation;
 		if (swing <= 0.0F || state.currentSwing == null) {
 			return;
 		}
 		HumanoidArm attackArm = state.currentSwing.hand().asArm(state.mainArm);
-		// Only an arm that is holding a weapon swings.
-		if (!(attackArm == HumanoidArm.RIGHT ? rightArmed : leftArmed)) {
-			return;
-		}
 		ModelPart arm = attackArm == HumanoidArm.RIGHT ? this.rightArm : this.leftArm;
 		ModelPart body = this.root.getChild("body");
 

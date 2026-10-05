@@ -99,12 +99,20 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int IDLE_MIN_TICKS = 180;
 	private static final int IDLE_EXTRA_TICKS = 40;
 
-	// Fighting with something in its hands: each hit does a little extra damage. A bamboo is plain extra damage; a breeze
-	// rod does less, but every hit also blasts the foe the way a wind charge would; a blaze rod adds no damage at all, but
-	// every hit does what a blaze's small fireball does to whatever it hits. Holding a blaze rod does not protect the
-	// bunnay from fire in any way.
+	// Fighting: it always swings its two hands in turn, an empty paw counting as a hand (the bunnay's own hit is 3). What it
+	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, a stick or a bone
+	// +1. A breeze rod also blasts the foe the way a wind charge would; a blaze rod also does what a blaze's small
+	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way); a bone also
+	// knocks the foe back a little further. All of them swing at the same pace.
+	private static final double ROD_BONUS_DAMAGE = 2.0;
 	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
-	private static final double BREEZE_ROD_BONUS_DAMAGE = 1.0;
+	private static final double STICK_BONUS_DAMAGE = 1.0;
+	private static final double BONE_BONUS_DAMAGE = 1.0;
+	/**
+	 * The extra shove a bone's hit gives, on top of the hit's own knockback (a mob's melee hit pushes with strength 0.4, so
+	 * 0.3 is about three quarters again as far). Raise it for a heavier hit.
+	 */
+	private static final double BONE_EXTRA_KNOCKBACK = 0.3;
 	/**
 	 * How long a hit with a blaze rod sets a foe on fire, in seconds: the same 5 a small fireball does (SmallFireball also
 	 * does 5 damage, which is left out here, and only places fire when it hits a block, not an entity, so no fire is placed).
@@ -115,10 +123,11 @@ public class BunnayEntity extends TamableAnimal {
 	private static final double WIND_BURST_HORIZONTAL = 0.5;
 	private static final double WIND_BURST_VERTICAL = 0.9;
 	/**
-	 * With a weapon in each hand it attacks faster: it may swing this many ticks before its usual 20 tick wait between
-	 * swings is up, so 4 means a swing every 16 ticks instead of 20, 25% faster. Raise it for a bigger bonus.
+	 * How fast it swings: it may swing this many ticks before the usual 20 tick wait between swings is up, so 4 means a swing
+	 * every 16 ticks instead of 20, 25% faster. The wait is shared by both hands (it swings them in turn), and it is the
+	 * same whatever they hold. It is higher than a plain mob's because the bunnay is always swinging two hands.
 	 */
-	private static final int DUAL_WIELD_ATTACK_HEAD_START_TICKS = 4;
+	private static final int ATTACK_HEAD_START_TICKS = 4;
 	/** How fast the ready stance eases in and out, per tick (it takes 4 ticks to raise and about 7 to lower). */
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
@@ -342,26 +351,17 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	/** Whether it has a weapon in its main hand; this is what makes it raise the weapon when it closes on a target. */
-	public boolean isDualWielding() {
-		return isHoldable(this.getMainHandItem()) && isHoldable(this.getOffhandItem());
-	}
-
+	/** Whether it has a weapon in either hand; this is what makes it raise the weapon when it closes on a target. */
 	public boolean isHoldingWeapon() {
 		return isHoldable(this.getMainHandItem()) || isHoldable(this.getOffhandItem());
 	}
 
 	/**
-	 * Which hand to attack with next: with a weapon in each it swings them in turn, and with only one it uses that one
-	 * (the main hand if it holds nothing at all).
+	 * Which hand to attack with next: it always swings its two hands in turn, whether or not they hold anything (an empty
+	 * paw swings too, for the bunnay's own damage).
 	 */
 	private InteractionHand chooseAttackHand() {
-		boolean main = isHoldable(this.getMainHandItem());
-		boolean off = isHoldable(this.getOffhandItem());
-		if (this.isDualWielding()) {
-			return this.attackHand == InteractionHand.MAIN_HAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-		}
-		return off ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+		return this.attackHand == InteractionHand.MAIN_HAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
 	}
 
 	// The melee goal swings the main hand; this swaps in the hand it should be, so the swing shows on that arm and
@@ -377,11 +377,19 @@ public class BunnayEntity extends TamableAnimal {
 		if (stack.is(Items.BAMBOO)) {
 			return BAMBOO_BONUS_DAMAGE;
 		}
-		if (stack.is(Items.BREEZE_ROD)) {
-			return BREEZE_ROD_BONUS_DAMAGE;
+		if (stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD)) {
+			return ROD_BONUS_DAMAGE;
+		}
+		if (stack.is(Items.STICK)) {
+			return STICK_BONUS_DAMAGE;
+		}
+		if (stack.is(Items.BONE)) {
+			return BONE_BONUS_DAMAGE;
 		}
 		return 0.0;
 	}
+
+
 
 	/**
 	 * Treats a foe as if a blaze's small fireball had hit it, without the fireball's damage: it is set on fire for 5
@@ -443,6 +451,9 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		if (hit && weapon.is(Items.BLAZE_ROD)) {
 			this.fireballHit(level, target);
+		}
+		if (hit && weapon.is(Items.BONE) && target instanceof LivingEntity victim) {
+			victim.knockback(BONE_EXTRA_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), this.damageSources().mobAttack(this), 0.0F);
 		}
 		return hit;
 	}
@@ -607,9 +618,10 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
-	/** Anything the bunnay can hold in its main hand as a weapon: a bamboo, a breeze rod or a blaze rod. */
+	/** Anything the bunnay can hold in a hand as a weapon: a bamboo, a breeze rod, a blaze rod, a stick or a bone. */
 	public static boolean isHoldable(ItemStack stack) {
-		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD);
+		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD)
+			|| stack.is(Items.STICK) || stack.is(Items.BONE);
 	}
 
 	@Override
@@ -996,19 +1008,15 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	/** The usual melee goal, except that with a weapon in each hand it may swing a little before the cooldown is up. */
+	/** The usual melee goal, except that it may swing a little before the cooldown is up (see ATTACK_HEAD_START_TICKS). */
 	private static final class BunnayMeleeGoal extends MeleeAttackGoal {
-		private final BunnayEntity bunnay;
-
 		BunnayMeleeGoal(BunnayEntity bunnay) {
 			super(bunnay, 1.3, true);
-			this.bunnay = bunnay;
 		}
 
 		@Override
 		protected boolean isTimeToAttack() {
-			int headStart = this.bunnay.isDualWielding() ? DUAL_WIELD_ATTACK_HEAD_START_TICKS : 0;
-			return this.getTicksUntilNextAttack() <= headStart;
+			return this.getTicksUntilNextAttack() <= ATTACK_HEAD_START_TICKS;
 		}
 	}
 }

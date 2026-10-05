@@ -103,7 +103,7 @@ public class BunnayMenu extends AbstractContainerMenu {
 		return original;
 	}
 
-	/** Holds one weapon (a bamboo, a breeze rod or a blaze rod); nothing else fits. Shows a rod outline when empty. */
+	/** Holds one weapon (a bamboo, a breeze rod, a blaze rod, a stick or a bone); nothing else fits. Shows a rod outline when empty. */
 	private static final class WeaponSlot extends Slot {
 		WeaponSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
