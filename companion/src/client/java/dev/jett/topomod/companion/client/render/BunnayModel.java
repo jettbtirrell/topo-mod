@@ -158,14 +158,16 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	private static final float SPIN_BACK_END = 0.97F;
 
 	/**
-	 * The weapon arm in the ready stance is the vex's charging pose (VexModel.setArmsCharging): raised up and back over
-	 * the head, 3.665 radians. That is the same angle as -2.618, which is the way round it is reached from a hanging arm
-	 * by raising it forward, so it eases up in front instead of sweeping back.
+	 * The weapon arm in the ready stance: raised forward by about 50 degrees (negative is forward and up; 0 hangs down).
+	 * It was the vex's full overhead charge pose, but on a head this close to the shoulders that put the held item
+	 * through the head, so it is a much slighter raise now. Raise it further for a more dramatic stance, and stop
+	 * short of about 100 degrees (-1.75) or the item starts to point at the head.
 	 */
-	private static final float READY_PITCH = 3.6651914F - Mth.TWO_PI;
-	private static final float READY_YAW = 0.2617994F;
-	/** Where the arm comes down to at the middle of a strike from the ready stance: forward and a little down. */
-	private static final float STRIKE_PITCH = -0.6F;
+	private static final float READY_PITCH = -0.9F;
+	/** A little in toward the body; kept small, since further in brings the item toward the head. */
+	private static final float READY_YAW = 0.1F;
+	/** Where the arm comes down to at the middle of a strike from the ready stance: nearly hanging, just forward of it. */
+	private static final float STRIKE_PITCH = -0.1F;
 
 	/**
 	 * Moves the pose stack to a hand, following the arm as it moves, for vanilla's ItemInHandLayer (the same hook the
