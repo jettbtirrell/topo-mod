@@ -68,6 +68,9 @@ import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.BunnayMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.block.CarrotBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.gameevent.DynamicGameEventListener;
 import net.minecraft.world.level.gameevent.EntityPositionSource;
 import net.minecraft.world.level.gameevent.GameEvent;
@@ -182,6 +185,19 @@ public class BunnayEntity extends TamableAnimal {
 	private static final double RETREAT_SEARCH_RADIUS = 14.0;
 	/** The wait after a retreat before it can start another, in ticks. */
 	private static final int RETREAT_COOLDOWN = 60;
+
+	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
+	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
+	// straight into its food slot. It only does this where mobs are allowed to grief, and never strays far from its owner.
+	/** How far it looks for carrots, sideways and up or down, in blocks. */
+	private static final int HARVEST_SEARCH_RADIUS = 10;
+	private static final int HARVEST_SEARCH_HEIGHT = 2;
+	/** It only works carrots this close to its owner, so harvesting does not lead it off. */
+	private static final double HARVEST_OWNER_RANGE = 16.0;
+	/** It breaks the carrots this long after it gets there (it swings at them first), in ticks. */
+	private static final int HARVEST_WORK_TICKS = 8;
+	/** It gives up on a carrot it cannot reach after this long, in ticks. */
+	private static final int HARVEST_GIVE_UP_TICKS = 200;
 
 	// Eating the carrots in its off hand to heal.
 	/** How long one carrot takes to eat, in ticks (the same as a player's). */
@@ -326,6 +342,12 @@ public class BunnayEntity extends TamableAnimal {
 			&& !this.isBigHopping()
 			&& !this.isDancing()
 			&& !this.isPassenger();
+	}
+
+	/** Whether another ordinary carrot would fit in the food slot (it is empty, or holds carrots with room; golden ones do not mix). */
+	private boolean canTakeCarrots() {
+		ItemStack held = this.food.getItem(0);
+		return held.isEmpty() || (held.is(Items.CARROT) && held.getCount() < held.getMaxStackSize());
 	}
 
 	/** Hurt enough to want to get out, with a carrot to eat once it has, and in a fight right now. */
@@ -728,6 +750,7 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(2, new BigHopGoal(this));
 		this.goalSelector.addGoal(2, new BunnayMeleeGoal(this));
 		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
+		this.goalSelector.addGoal(4, new HarvestCarrotsGoal(this));
 		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
 		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
@@ -1354,6 +1377,149 @@ public class BunnayEntity extends TamableAnimal {
 				}
 			}
 			return false;
+		}
+	}
+
+	/**
+	 * Goes to a fully grown carrot it can reach, swings at it, breaks it, puts the drops in its food slot (whatever does
+	 * not fit is dropped as usual), and plants a new carrot where it was. One carrot per run; it looks for the next a
+	 * moment later.
+	 */
+	private static final class HarvestCarrotsGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private BlockPos crop;
+		private int workTicks;
+		private int giveUpTicks;
+		/** Ticks until it next scans for carrots, so the search is not done every tick. */
+		private int scanDelay;
+
+		HarvestCarrotsGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		/** Able to harvest right now: tame, calm, not mid-something, with room for carrots, and mobs may grief. */
+		private boolean canHarvest() {
+			if (!(this.bunnay.level() instanceof ServerLevel level)) {
+				return false;
+			}
+			LivingEntity target = this.bunnay.getTarget();
+			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
+				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+				&& (target == null || !target.isAlive())
+				&& this.bunnay.canTakeCarrots()
+				&& level.getGameRules().get(GameRules.MOB_GRIEFING);
+		}
+
+		private boolean isRipeCarrot(BlockPos pos) {
+			BlockState state = this.bunnay.level().getBlockState(pos);
+			return state.getBlock() instanceof CarrotBlock carrots && carrots.isMaxAge(state);
+		}
+
+		@Override
+		public boolean canUse() {
+			if (this.scanDelay > 0) {
+				this.scanDelay--;
+				return false;
+			}
+			this.scanDelay = 20 + this.bunnay.getRandom().nextInt(20);
+			if (!this.canHarvest()) {
+				return false;
+			}
+			this.crop = this.findCrop();
+			return this.crop != null;
+		}
+
+		/** The nearest ripe carrot (close enough to its owner) that it has a path to, or null. */
+		private BlockPos findCrop() {
+			LivingEntity owner = this.bunnay.getOwner();
+			BlockPos origin = this.bunnay.blockPosition();
+			List<BlockPos> ripe = new java.util.ArrayList<>();
+			for (BlockPos pos : BlockPos.betweenClosed(
+				origin.offset(-HARVEST_SEARCH_RADIUS, -HARVEST_SEARCH_HEIGHT, -HARVEST_SEARCH_RADIUS),
+				origin.offset(HARVEST_SEARCH_RADIUS, HARVEST_SEARCH_HEIGHT, HARVEST_SEARCH_RADIUS)
+			)) {
+				if (this.isRipeCarrot(pos) && (owner == null || owner.distanceToSqr(Vec3.atCenterOf(pos)) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE)) {
+					ripe.add(pos.immutable());
+				}
+			}
+			ripe.sort(Comparator.comparingDouble(pos -> this.bunnay.distanceToSqr(Vec3.atCenterOf(pos))));
+			for (BlockPos pos : ripe.stream().limit(5).toList()) {
+				if (this.bunnay.getNavigation().createPath(pos, 1) != null) {
+					return pos;
+				}
+			}
+			return null;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.crop != null && this.giveUpTicks < HARVEST_GIVE_UP_TICKS && this.canHarvest() && this.isRipeCarrot(this.crop);
+		}
+
+		@Override
+		public void start() {
+			this.workTicks = 0;
+			this.giveUpTicks = 0;
+			this.bunnay.getNavigation().moveTo(this.crop.getX() + 0.5, this.crop.getY(), this.crop.getZ() + 0.5, 1.2);
+		}
+
+		@Override
+		public void stop() {
+			this.crop = null;
+			this.bunnay.getNavigation().stop();
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void tick() {
+			this.giveUpTicks++;
+			Vec3 center = Vec3.atCenterOf(this.crop);
+			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
+			if (this.bunnay.distanceToSqr(center) > 1.9 * 1.9) {
+				// Still on its way (or the path ran out short): keep heading for it.
+				this.workTicks = 0;
+				if (this.bunnay.getNavigation().isDone()) {
+					this.bunnay.getNavigation().moveTo(center.x, this.crop.getY(), center.z, 1.2);
+				}
+				return;
+			}
+
+			this.bunnay.getNavigation().stop();
+			this.workTicks++;
+			if (this.workTicks == 1) {
+				this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
+			}
+			if (this.workTicks >= HARVEST_WORK_TICKS && this.bunnay.level() instanceof ServerLevel level) {
+				this.harvest(level);
+			}
+		}
+
+		/** Breaks the carrot and picks up what it drops, straight into the food slot. */
+		private void harvest(ServerLevel level) {
+			BlockState state = level.getBlockState(this.crop);
+			List<ItemStack> drops = Block.getDrops(state, level, this.crop, null, this.bunnay, ItemStack.EMPTY);
+			level.destroyBlock(this.crop, false, this.bunnay);
+			for (ItemStack drop : drops) {
+				ItemStack leftover = this.bunnay.food.addItem(drop);
+				if (!leftover.isEmpty()) {
+					Block.popResource(level, this.crop, leftover);
+				}
+			}
+			this.bunnay.food.setChanged();
+			level.playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
+
+			// Plants a new carrot in the same spot, so the field keeps growing. It costs nothing, and only goes in where
+			// there is still farmland under it.
+			if (level.getBlockState(this.crop).isAir() && level.getBlockState(this.crop.below()).is(Blocks.FARMLAND)) {
+				level.setBlockAndUpdate(this.crop, Blocks.CARROTS.defaultBlockState());
+				level.playSound(null, this.crop, SoundEvents.CROP_PLANTED, SoundSource.NEUTRAL, 0.8F, 1.0F);
+			}
+			this.crop = null;
 		}
 	}
 }
