@@ -110,8 +110,8 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int HOP_TAKEOFF_TICK = 4;
 	/** Ticks it spends in the air. Every hop is worked out to take exactly this long, whatever its length, so the clip always fits. */
 	private static final int HOP_AIR_TICKS = 15;
-	/** How far a hop can take it: 4 blocks along the ground and 2 up or down, the same as the frog's long jump. */
-	private static final double HOP_MAX_DISTANCE = 4.0;
+	/** How far a hop can take it: 6 blocks along the ground (the frog's long jump is 4) and 2 up or down, the same as the frog's. */
+	private static final double HOP_MAX_DISTANCE = 6.0;
 	private static final int HOP_MAX_RISE = 2;
 	private static final int HOP_MAX_DROP = 2;
 	/** A hop has to be at least this long (in blocks), and has to bring it at least this much closer to where it is going. */
