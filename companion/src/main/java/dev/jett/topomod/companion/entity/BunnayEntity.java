@@ -10,7 +10,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
@@ -70,7 +69,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.alchemy.PotionContents;
 import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.BunnayMenu;
 import net.minecraft.world.level.Level;
@@ -118,22 +116,13 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int IDLE_EXTRA_TICKS = 40;
 
 	// Fighting: it always swings its two hands in turn, an empty paw counting as a hand (the bunnay's own hit is 3). What it
-	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, a stick or a bone
+	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, or a stick
 	// +1. A breeze rod also blasts the foe the way a wind charge would; a blaze rod also does what a blaze's small
-	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way); a bone also
-	// knocks the foe back a little further; an arrow does +1, and a tipped arrow also gives the foe its potion effects, good
-	// ones too (see applyArrowEffects). Arrows are ammo: each hit that lands uses one up, so a hand can hold a stack of them
-	// (the others are one item). All of them swing at the same pace.
+	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way). All of them swing
+	// at the same pace.
 	private static final double ROD_BONUS_DAMAGE = 2.0;
 	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
 	private static final double STICK_BONUS_DAMAGE = 1.0;
-	private static final double BONE_BONUS_DAMAGE = 1.0;
-	private static final double ARROW_BONUS_DAMAGE = 1.0;
-	/**
-	 * The extra shove a bone's hit gives, on top of the hit's own knockback (a mob's melee hit pushes with strength 0.4, so
-	 * 0.3 is about three quarters again as far). Raise it for a heavier hit.
-	 */
-	private static final double BONE_EXTRA_KNOCKBACK = 0.3;
 	/**
 	 * How long a hit with a blaze rod sets a foe on fire, in seconds: the same 5 a small fireball does (SmallFireball also
 	 * does 5 damage, which is left out here, and only places fire when it hits a block, not an entity, so no fire is placed).
@@ -697,12 +686,6 @@ public class BunnayEntity extends TamableAnimal {
 		if (stack.is(Items.STICK)) {
 			return STICK_BONUS_DAMAGE;
 		}
-		if (stack.is(Items.BONE)) {
-			return BONE_BONUS_DAMAGE;
-		}
-		if (isArrow(stack)) {
-			return ARROW_BONUS_DAMAGE;
-		}
 		return 0.0;
 	}
 
@@ -718,19 +701,6 @@ public class BunnayEntity extends TamableAnimal {
 		level.sendParticles(ParticleTypes.FLAME, target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(), 14, 0.25, 0.3, 0.25, 0.03);
 		level.sendParticles(ParticleTypes.SMOKE, target.getX(), target.getY() + target.getBbHeight() * 0.6, target.getZ(), 6, 0.2, 0.3, 0.2, 0.02);
 		level.playSound(null, target.getX(), target.getY(), target.getZ(), SoundEvents.FIRECHARGE_USE, SoundSource.NEUTRAL, 1.0F, 1.0F);
-	}
-
-	/**
-	 * Gives a foe the potion effects of a tipped arrow it hit with, the way a fired arrow would: each effect lasts as long
-	 * as the arrow item says (the tipped arrow's own duration scale, which is a eighth of the potion's), instant effects
-	 * happen at once, and the arrow's source is the bunnay. A fired arrow gives them to whatever it hits, so the good ones
-	 * too: an arrow of healing heals the foe and one of regeneration makes it regenerate. The hit also uses the arrow up (see
-	 * doHurtTarget), which is what keeps an arrow of harming from being the best weapon there is.
-	 */
-	private void applyArrowEffects(ItemStack arrow, LivingEntity victim) {
-		PotionContents contents = arrow.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
-		float durationScale = arrow.getOrDefault(DataComponents.POTION_DURATION_SCALE, 1.0F);
-		contents.forEachEffect(effect -> victim.addEffect(effect, this), durationScale);
 	}
 
 	/**
@@ -781,19 +751,6 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		if (hit && weapon.is(Items.BLAZE_ROD)) {
 			this.fireballHit(level, target);
-		}
-		if (hit && weapon.is(Items.TIPPED_ARROW) && target instanceof LivingEntity victim) {
-			this.applyArrowEffects(weapon, victim);
-		}
-		if (hit && isArrow(weapon)) {
-			// A hit uses an arrow up, after its effects have been given; the hand is empty when the last one goes.
-			weapon.shrink(1);
-			if (weapon.isEmpty()) {
-				this.setItemSlot(this.attackHand == InteractionHand.MAIN_HAND ? EquipmentSlot.MAINHAND : EquipmentSlot.OFFHAND, ItemStack.EMPTY);
-			}
-		}
-		if (hit && weapon.is(Items.BONE) && target instanceof LivingEntity victim) {
-			victim.knockback(BONE_EXTRA_KNOCKBACK, this.getX() - victim.getX(), this.getZ() - victim.getZ(), this.damageSources().mobAttack(this), 0.0F);
 		}
 		return hit;
 	}
@@ -970,18 +927,9 @@ public class BunnayEntity extends TamableAnimal {
 		return false;
 	}
 
-	/** An arrow or a tipped arrow: the weapons that are used up, one per hit, and that a hand can hold a stack of. */
-	public static boolean isArrow(ItemStack stack) {
-		return stack.is(Items.ARROW) || stack.is(Items.TIPPED_ARROW);
-	}
-
-	/**
-	 * Anything the bunnay can hold in a hand as a weapon: a bamboo, a breeze rod, a blaze rod, a stick, a bone, an arrow
-	 * or a tipped arrow.
-	 */
+	/** Anything the bunnay can hold in a hand as a weapon: a bamboo, a breeze rod, a blaze rod or a stick. */
 	public static boolean isHoldable(ItemStack stack) {
-		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD)
-			|| stack.is(Items.STICK) || stack.is(Items.BONE) || stack.is(Items.ARROW) || stack.is(Items.TIPPED_ARROW);
+		return stack.is(Items.BAMBOO) || stack.is(Items.BREEZE_ROD) || stack.is(Items.BLAZE_ROD) || stack.is(Items.STICK);
 	}
 
 	@Override
@@ -1005,7 +953,7 @@ public class BunnayEntity extends TamableAnimal {
 			if (isHoldable(stack) && (this.getMainHandItem().isEmpty() || this.getOffhandItem().isEmpty())) {
 				if (!this.level().isClientSide()) {
 					EquipmentSlot slot = this.getMainHandItem().isEmpty() ? EquipmentSlot.MAINHAND : EquipmentSlot.OFFHAND;
-					this.setItemSlot(slot, stack.split(isArrow(stack) ? stack.getCount() : 1));
+					this.setItemSlot(slot, stack.split(1));
 					this.setGuaranteedDrop(slot);
 					this.setPersistenceRequired();
 				}
@@ -1394,7 +1342,8 @@ public class BunnayEntity extends TamableAnimal {
 	/**
 	 * Breaks off a fight to heal. First it springs away from the enemies (the big hop, aimed at open ground away from
 	 * them); then it holds still, which is when tickEating gets to eat its carrots. If an enemy that is after it gets
-	 * close while it recovers, it springs away again, a few times at most.
+	 * close while it recovers, it springs away again, a few times at most. If it is in water it can do none of that, so
+	 * it swims for the nearest shore first (away from the enemies if it can), and the rest follows once it is out.
 	 */
 	private static final class RetreatGoal extends Goal {
 		private final BunnayEntity bunnay;
@@ -1404,7 +1353,8 @@ public class BunnayEntity extends TamableAnimal {
 
 		RetreatGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
+			// No JUMP flag: that is what FloatGoal uses to keep it afloat, and it must keep running while it swims out.
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
 		}
 
 		@Override
@@ -1434,6 +1384,10 @@ public class BunnayEntity extends TamableAnimal {
 				this.tickJump();
 				return;
 			}
+			if (this.bunnay.isInWater()) {
+				this.swimToShore();
+				return;
+			}
 			// Holding still, so that it can eat.
 			this.bunnay.getNavigation().stop();
 			if (this.bunnay.retreatJumps >= RETREAT_MAX_JUMPS || !this.canJump()) {
@@ -1442,6 +1396,55 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.bunnay.retreatJumps == 0 || (this.bunnay.tickCount % 5 == 0 && this.threatenedNow())) {
 				this.startJump();
 			}
+		}
+
+		/** In water it can neither hop nor eat: head for the nearest dry ground, preferring the way away from the enemies. */
+		private void swimToShore() {
+			if (this.bunnay.getNavigation().isDone() || this.bunnay.tickCount % 20 == 0) {
+				Vec3 shore = this.findShore();
+				if (shore != null && !this.bunnay.getNavigation().moveTo(shore.x, shore.y, shore.z, 1.3)) {
+					// No path through the water: just head straight there.
+					this.bunnay.getMoveControl().setWantedPosition(shore.x, shore.y, shore.z, 1.3);
+				}
+			}
+		}
+
+		/** The nearest safe dry spot in a ring around it, with the ones away from the enemies counting as a few blocks nearer. */
+		private Vec3 findShore() {
+			Vec3 here = this.bunnay.position();
+			Vec3 threatCenter = Vec3.ZERO;
+			List<Mob> threats = this.bunnay.nearbyThreats();
+			for (Mob mob : threats) {
+				threatCenter = threatCenter.add(mob.position());
+			}
+			Vec3 away = Vec3.ZERO;
+			if (!threats.isEmpty()) {
+				away = here.subtract(threatCenter.scale(1.0 / threats.size())).multiply(1.0, 0.0, 1.0);
+				away = away.lengthSqr() < 1.0E-4 ? Vec3.ZERO : away.normalize();
+			}
+			Vec3 best = null;
+			double bestScore = Double.MAX_VALUE;
+			for (int i = 0; i < 16; i++) {
+				double radians = Math.PI * 2.0 * i / 16.0;
+				Vec3 dir = new Vec3(Math.cos(radians), 0.0, Math.sin(radians));
+				for (double distance : new double[]{2.0, 3.0, 4.5, 6.0, 8.0, 10.0, 12.0}) {
+					Vec3 landing = this.landingAt(here.add(dir.scale(distance)));
+					if (landing == null) {
+						continue;
+					}
+					double score = distance - 3.0 * dir.dot(away);
+					if (score < bestScore) {
+						bestScore = score;
+						best = landing;
+					}
+					break;
+				}
+			}
+			if (best == null) {
+				LivingEntity owner = this.bunnay.getOwner();
+				return owner != null ? owner.position() : null;
+			}
+			return best;
 		}
 
 		private boolean canJump() {
@@ -1554,6 +1557,11 @@ public class BunnayEntity extends TamableAnimal {
 
 		/** Solid ground to stand on within a few blocks up or down of here, with room above it, and no water or lava. */
 		private boolean safeLanding(Vec3 point) {
+			return this.landingAt(point) != null;
+		}
+
+		/** Where it would stand if it came down at this point (see safeLanding), or null if there is nowhere safe. */
+		private Vec3 landingAt(Vec3 point) {
 			Level level = this.bunnay.level();
 			for (int dy = 2; dy >= -4; dy--) {
 				BlockPos feet = BlockPos.containing(point.x, this.bunnay.getY() + dy, point.z);
@@ -1563,10 +1571,10 @@ public class BunnayEntity extends TamableAnimal {
 					&& level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
 					&& level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()
 					&& level.getFluidState(feet).isEmpty() && !floorState.is(Blocks.MAGMA_BLOCK)) {
-					return true;
+					return new Vec3(point.x, feet.getY(), point.z);
 				}
 			}
-			return false;
+			return null;
 		}
 	}
 
