@@ -9,15 +9,15 @@ import net.minecraft.util.Mth;
 // Keyframe animations for the bunnay. Values are offsets from the rest pose: rotations in degrees, positions in
 // model pixels. Position keyframes are made with linearPos, which takes y down like the model does.
 public final class BunnayAnimation {
-	// Declared first: BIG_HOP is built while the class loads, and it needs this already set.
+	// Declared first: HOP is built while the class loads, and it needs this already set.
 	private static final AnimationChannel.Interpolation SMOOTH = AnimationChannel.Interpolations.CATMULLROM;
 
 	/**
-	 * The big hop: crouch (0 to 0.2s), launch, airborne (0.2 to 0.95s), landing squash and recover (0.95 to 1.3s).
+	 * The hop: crouch (0 to 0.2s), launch, airborne (0.2 to 0.95s), landing squash and recover (0.95 to 1.3s).
 	 * The timings match BunnayEntity: the launch happens at tick 4 (0.2s) and the landing about 15 ticks later, so
-	 * keep BIG_HOP_TAKEOFF_TICK, BIG_HOP_LAUNCH_SPEED and BIG_HOP_TICKS there in step with this.
+	 * keep HOP_TAKEOFF_TICK, HOP_AIR_TICKS and HOP_TICKS there in step with this.
 	 */
-	public static final AnimationDefinition BIG_HOP = build();
+	public static final AnimationDefinition HOP = build();
 
 	/**
 	 * The idle, adapted from the rabbit's: a four second clip where it perks up, looks to one side and then the

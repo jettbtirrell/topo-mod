@@ -44,7 +44,7 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 		if (state.eatProgress > 0.0F && !eating.isEmpty()) {
 			this.itemModelResolver.updateForLiving(state.leftHandItemState, eating, ItemDisplayContext.THIRD_PERSON_LEFT_HAND, entity);
 		}
-		state.bigHopAnimationState.copyFrom(entity.bigHopAnimationState);
+		state.hopAnimationState.copyFrom(entity.hopAnimationState);
 		state.idleAnimationState.copyFrom(entity.idleAnimationState);
 		state.isDancing = entity.isDancing();
 		state.isSitting = entity.isInSittingPose();

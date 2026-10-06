@@ -4,8 +4,8 @@ import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
 import net.minecraft.world.entity.AnimationState;
 
 public class BunnayRenderState extends ArmedEntityRenderState {
-	/** Plays the big hop; copied from the entity each frame. */
-	public final AnimationState bigHopAnimationState = new AnimationState();
+	/** Plays the hop; copied from the entity each frame. */
+	public final AnimationState hopAnimationState = new AnimationState();
 	/** Plays the idle; copied from the entity each frame. */
 	public final AnimationState idleAnimationState = new AnimationState();
 	/** True while it is dancing to a jukebox. */

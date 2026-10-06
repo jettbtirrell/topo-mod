@@ -26,7 +26,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	private final ModelPart rightArm;
 	private final ModelPart leftLeg;
 	private final ModelPart rightLeg;
-	private final KeyframeAnimation bigHopAnimation;
+	private final KeyframeAnimation hopAnimation;
 	private final KeyframeAnimation idleAnimation;
 
 	public BunnayModel(ModelPart root) {
@@ -37,7 +37,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		this.rightArm = root.getChild("right_arm");
 		this.leftLeg = root.getChild("left_leg");
 		this.rightLeg = root.getChild("right_leg");
-		this.bigHopAnimation = BunnayAnimation.BIG_HOP.bake(root);
+		this.hopAnimation = BunnayAnimation.HOP.bake(root);
 		this.idleAnimation = BunnayAnimation.IDLE.bake(root);
 	}
 
@@ -130,7 +130,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 
 		// Keyframed clips go on last: they are offsets from the pose above.
 		this.idleAnimation.apply(state.idleAnimationState, state.ageInTicks);
-		this.bigHopAnimation.apply(state.bigHopAnimationState, state.ageInTicks);
+		this.hopAnimation.apply(state.hopAnimationState, state.ageInTicks);
 	}
 
 	/**
@@ -201,16 +201,16 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	}
 
 	/**
-	 * How far the held item is turned about the hand, in degrees, during the big hop. The hop whips the arm up and
+	 * How far the held item is turned about the hand, in degrees, during the hop. The hop whips the arm up and
 	 * forward, which points the item up through the head, so the item flips forward into a reverse grip (blade away
 	 * from the head) as the arm goes up, stays flipped in the air, then flips back as the arm comes down to land. The
-	 * times are seconds into the hop clip and line up with BunnayAnimation.BIG_HOP.
+	 * times are seconds into the hop clip and line up with BunnayAnimation.HOP.
 	 */
 	private static float itemSpinDegrees(BunnayRenderState state) {
-		if (!state.bigHopAnimationState.isStarted()) {
+		if (!state.hopAnimationState.isStarted()) {
 			return 0.0F;
 		}
-		float t = state.bigHopAnimationState.getTimeInMillis(state.ageInTicks) / 1000.0F;
+		float t = state.hopAnimationState.getTimeInMillis(state.ageInTicks) / 1000.0F;
 		if (t <= SPIN_OUT_START || t >= SPIN_BACK_END) {
 			return 0.0F;
 		}

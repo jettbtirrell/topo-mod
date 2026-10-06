@@ -2,6 +2,8 @@ package dev.jett.topomod.companion.entity;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.function.ToDoubleFunction;
 import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
@@ -67,6 +69,8 @@ import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
 import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -96,20 +100,56 @@ public class BunnayEntity extends TamableAnimal {
 	private static final double WILD_HEALTH = 16.0;
 	private static final double TAME_HEALTH = 80.0;
 
-	// The big hop: a crouch, a launch, a couple of blocks of height, and a squashy landing. The keyframe clip is
-	// BunnayAnimation.BIG_HOP; these numbers have to stay in step with it (see the comment there).
+	// Hopping, like a frog's long jump. Whenever the hop is off cooldown, the bunnay looks for a place within reach to land
+	// that gets it where it is going at least HOP_MIN_DISTANCE closer than walking would, and if there is one it crouches and
+	// hops there. Where it is going is its target, the end of the path it is walking, or its owner when it is following them
+	// and there is no way to walk there. The keyframe clip is BunnayAnimation.HOP; these numbers have to stay in step with it.
 	/** Length of the whole hop in ticks (the clip is 1.3 seconds). */
-	private static final int BIG_HOP_TICKS = 26;
+	private static final int HOP_TICKS = 26;
 	/** Tick of the hop that the legs push off (the crouch lasts this long). */
-	private static final int BIG_HOP_TAKEOFF_TICK = 4;
-	/** Upward speed at takeoff; 0.55 gives about 2 blocks of height and 15 ticks in the air. */
-	private static final double BIG_HOP_LAUNCH_SPEED = 0.55;
-	/** Forward speed at takeoff, which carries it about 2.5 blocks: about 5.45 blocks per point of speed (see LEAP_BLOCKS_PER_SPEED). */
-	private static final double BIG_HOP_FORWARD_SPEED = 0.45;
-	/** A walking bunnay starts a big hop with a 1-in-this chance each time its goals are checked (about every 6 seconds). */
-	private static final int BIG_HOP_ODDS = 40;
-	/** Minimum ticks between big hops. */
-	private static final int BIG_HOP_COOLDOWN = 100;
+	private static final int HOP_TAKEOFF_TICK = 4;
+	/** Ticks it spends in the air. Every hop is worked out to take exactly this long, whatever its length, so the clip always fits. */
+	private static final int HOP_AIR_TICKS = 15;
+	/** How far a hop can take it: 4 blocks along the ground and 2 up or down, the same as the frog's long jump. */
+	private static final double HOP_MAX_DISTANCE = 4.0;
+	private static final int HOP_MAX_RISE = 2;
+	private static final int HOP_MAX_DROP = 2;
+	/** A hop has to be at least this long (in blocks), and has to bring it at least this much closer to where it is going. */
+	private static final double HOP_MIN_DISTANCE = 2.0;
+	/** The wait after a hop, in ticks: 100 to 140, which is 5 to 7 seconds, the frog's. */
+	private static final int HOP_COOLDOWN_MIN = 100;
+	private static final int HOP_COOLDOWN_RANGE = 41;
+	/** While the hop is off cooldown it looks for somewhere to hop this often, in ticks. */
+	private static final int HOP_SCAN_INTERVAL = 5;
+	/** It works out the arc of this many of the best landing spots before giving up. */
+	private static final int HOP_MAX_TRIES = 12;
+	// What a mob's movement does each tick, which the arcs are worked out from: horizontal speed is cut to 0.546 of itself on
+	// the tick it leaves the ground (the friction of the block it is leaving) and to 0.91 of itself every tick after, and the
+	// vertical speed loses 0.08 to gravity and is then cut to 0.98.
+	private static final double HOP_GROUND_FRICTION = 0.546;
+	private static final double HOP_AIR_FRICTION = 0.91;
+	private static final double HOP_GRAVITY = 0.08;
+	private static final double HOP_VERTICAL_DRAG = 0.98;
+	/** After n ticks, the blocks covered per point of horizontal launch speed. */
+	private static final double[] HOP_REACH = new double[HOP_AIR_TICKS + 1];
+	/** After n ticks, the blocks risen per point of upward launch speed (that is, without gravity). */
+	private static final double[] HOP_RISE = new double[HOP_AIR_TICKS + 1];
+	/** After n ticks, the blocks fallen under gravity alone (a negative number). */
+	private static final double[] HOP_SAG = new double[HOP_AIR_TICKS + 1];
+
+	static {
+		double horizontal = 1.0;
+		double rise = 1.0;
+		double sag = 0.0;
+		for (int tick = 1; tick <= HOP_AIR_TICKS; tick++) {
+			HOP_REACH[tick] = HOP_REACH[tick - 1] + horizontal;
+			horizontal *= tick == 1 ? HOP_GROUND_FRICTION : HOP_AIR_FRICTION;
+			HOP_RISE[tick] = HOP_RISE[tick - 1] + rise;
+			rise *= HOP_VERTICAL_DRAG;
+			HOP_SAG[tick] = HOP_SAG[tick - 1] + sag;
+			sag = (sag - HOP_GRAVITY) * HOP_VERTICAL_DRAG;
+		}
+	}
 
 	// The idle animation is cosmetic and runs on the client only, on the same timer as the rabbit's: a new one every
 	// 180 to 219 ticks (9 to 11 seconds) while standing still.
@@ -143,35 +183,13 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
 
-	// The leap: from a distance, it can spring at its target with the same crouch and big hop animation, to close the gap.
-	// It is only a way of getting there; the landing does no damage of its own.
-	/** The target has to be at least this far away (in blocks, along the ground) for a leap to be worth it, and no further than the max. */
-	private static final double LEAP_MIN_DISTANCE = 5.0;
-	private static final double LEAP_MAX_DISTANCE = 11.0;
-	/** Minimum ticks between leaps (8 seconds). */
-	private static final int LEAP_COOLDOWN = 160;
-	/** When it can leap, it decides to with a 1-in-this chance each time its goals are checked (so within a second or so). */
-	private static final int LEAP_ODDS = 4;
-	/** How far short of the target it aims to land, in blocks, so it does not run into it. */
-	private static final double LEAP_STOP_SHORT = 1.0;
-	/**
-	 * Blocks covered by the time it lands, per point of forward launch speed. The speed is cut to 0.546 of itself on the
-	 * launch tick (the friction of the block it is leaving), then to 0.91 of itself every tick in the air, over the 15
-	 * ticks the hop spends there: 1 + 0.546 * (1 + 0.91 + 0.91^2 + ... for 14 ticks) is about 5.45.
-	 */
-	private static final double LEAP_BLOCKS_PER_SPEED = 5.45;
-	/** Fast enough to cover the longest leap: (11 - 1) / 5.45 is about 1.83. */
-	private static final double LEAP_MAX_SPEED = 1.85;
-
 	// Retreating to heal. A tamed bunnay in a fight that is hurt down to RETREAT_BELOW_FRACTION of its health, and has a
-	// carrot to eat, breaks off: it springs well away from the enemies (the big hop, aimed at open ground away from them),
+	// carrot to eat, breaks off: it hops away from the enemies (to open ground, as far from them as it can reach),
 	// drops the fight, and stands still eating until it is about healed, without being drawn back in. Then it goes back to
 	// the nearest enemy that is after its owner.
 	private static final float RETREAT_BELOW_FRACTION = 0.35F;
 	/** It only breaks off a fight it is really in: it has a target, or was hurt by a mob this recently (in ticks). */
 	private static final int RETREAT_FIGHT_TICKS = 100;
-	/** How far the escape jump aims to land, in blocks (the forward speed is this over LEAP_BLOCKS_PER_SPEED). */
-	private static final double RETREAT_JUMP_DISTANCE = 9.0;
 	/** An enemy that is after it, or this close (in blocks), while it recovers makes it spring away again... */
 	private static final double RETREAT_THREAT_DISTANCE = 5.0;
 	/** ...up to this many jumps in one retreat. */
@@ -228,10 +246,10 @@ public class BunnayEntity extends TamableAnimal {
 
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
-	private static final EntityDataAccessor<Boolean> DATA_BIG_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
+	private static final EntityDataAccessor<Boolean> DATA_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
-	/** Drives the big hop animation on the client. */
-	public final AnimationState bigHopAnimationState = new AnimationState();
+	/** Drives the hop animation on the client. */
+	public final AnimationState hopAnimationState = new AnimationState();
 	/** Plays the idle animation on the client. */
 	public final AnimationState idleAnimationState = new AnimationState();
 	private int idleAnimationTimeout;
@@ -279,10 +297,9 @@ public class BunnayEntity extends TamableAnimal {
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
-	private int bigHopCooldown;
-	private int leapCooldown;
-	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
-	private int bigHopAnimationTicks;
+	private int hopCooldown;
+	/** Whether its follow-the-owner goal is running, which is when it hops towards its owner even if it cannot walk there. */
+	private boolean following;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
 		super(type, level);
@@ -293,7 +310,7 @@ public class BunnayEntity extends TamableAnimal {
 	@Override
 	protected void defineSynchedData(SynchedEntityData.Builder entityData) {
 		super.defineSynchedData(entityData);
-		entityData.define(DATA_BIG_HOPPING, false);
+		entityData.define(DATA_HOPPING, false);
 		entityData.define(DATA_EATING, false);
 		entityData.define(DATA_EATING_FOOD, ItemStack.EMPTY);
 		entityData.define(DATA_DANCING, false);
@@ -367,7 +384,7 @@ public class BunnayEntity extends TamableAnimal {
 			&& this.getMaxHealth() - this.getHealth() >= (alreadyEating ? EAT_KEEP_GOING_MISSING_HEALTH : EAT_MIN_MISSING_HEALTH)
 			&& this.onGround()
 			&& !this.isInWater()
-			&& !this.isBigHopping()
+			&& !this.isHopping()
 			&& !this.isDancing()
 			&& !this.isPassenger();
 	}
@@ -748,15 +765,196 @@ public class BunnayEntity extends TamableAnimal {
 
 	}
 
-	public boolean isBigHopping() {
-		return this.entityData.get(DATA_BIG_HOPPING);
+	public boolean isHopping() {
+		return this.entityData.get(DATA_HOPPING);
+	}
+
+	// ---- planning a hop ----
+
+	/** A hop worked out: the launch velocity and where it lands. */
+	private record Hop(Vec3 velocity, Vec3 landing) {
+	}
+
+	private record Spot(double cost, Vec3 landing) {
+	}
+
+	/** Free to hop: on the ground and not busy with anything that has it standing, swimming, riding or dancing. */
+	private boolean canHopNow() {
+		return this.onGround() && !this.isInWater() && !this.isPassenger() && !this.isBaby() && !this.isHopping() && !this.isEating()
+			&& !this.isDancing() && !this.isInSittingPose() && !this.retreating;
+	}
+
+	/**
+	 * A hop towards where it is going, if there is one worth making. Where it is going is, in order: its target, when it is
+	 * fighting and cannot just walk there; the path it is walking, when that leads to where it is going; its owner, when it is
+	 * following them and cannot walk there; or the end of the path it is walking.
+	 */
+	private @Nullable Hop planTravelHop() {
+		LivingEntity target = this.getTarget();
+		Path path = this.getNavigation().getPath();
+		boolean walking = path != null && !path.isDone() && path.getNodeCount() > 0;
+		if (walking && path.canReach()) {
+			return this.planAlong(path);
+		}
+		LivingEntity owner = this.getOwner();
+		Vec3 goal = target != null && target.isAlive() ? target.position() : this.following && owner != null ? owner.position() : null;
+		if (goal != null) {
+			return this.planToward(goal);
+		}
+		return walking ? this.planAlong(path) : null;
+	}
+
+	/** A hop that lands nearer a point, when there is no path to follow to it. It does not land on top of it. */
+	private @Nullable Hop planToward(Vec3 goal) {
+		double now = this.position().distanceTo(goal);
+		return this.planHop(landing -> {
+			double distance = landing.distanceTo(goal);
+			return distance < 1.2 ? Double.MAX_VALUE : distance;
+		}, now - HOP_MIN_DISTANCE);
+	}
+
+	/**
+	 * A hop that skips ahead along the path it is walking: landing next to one of the later nodes of the path, so that it
+	 * cuts off at least HOP_MIN_DISTANCE of walking. It never leaves the route, so it cannot hop into a dead end, and where the
+	 * route goes the long way round a gap or up a ledge, a hop over the gap or up the ledge is a big saving.
+	 */
+	private @Nullable Hop planAlong(Path path) {
+		int count = path.getNodeCount();
+		int next = path.getNextNodeIndex();
+		if (next >= count) {
+			return null;
+		}
+		Vec3[] centers = new Vec3[count];
+		double[] remaining = new double[count];
+		for (int i = 0; i < count; i++) {
+			centers[i] = Vec3.atBottomCenterOf(path.getNodePos(i));
+		}
+		for (int i = count - 2; i >= 0; i--) {
+			remaining[i] = remaining[i + 1] + centers[i].distanceTo(centers[i + 1]);
+		}
+		double now = this.position().distanceTo(centers[next]) + remaining[next];
+		return this.planHop(landing -> {
+			double best = Double.MAX_VALUE;
+			for (int i = next; i < count; i++) {
+				Vec3 node = centers[i];
+				if (Math.abs(landing.x - node.x) <= 1.0 && Math.abs(landing.z - node.z) <= 1.0 && Math.abs(landing.y - node.y) <= 1.5) {
+					best = Math.min(best, landing.distanceTo(node) + remaining[i]);
+				}
+			}
+			return best;
+		}, now - HOP_MIN_DISTANCE);
+	}
+
+	/** A hop away from the enemies near it: the landing spot has to be at least HOP_MIN_DISTANCE further from them than it is now. */
+	private @Nullable Hop planFleeHop() {
+		List<Mob> threats = this.nearbyThreats();
+		if (threats.isEmpty()) {
+			return null;
+		}
+		Vec3 center = Vec3.ZERO;
+		for (Mob mob : threats) {
+			center = center.add(mob.position());
+		}
+		Vec3 threatCenter = center.scale(1.0 / threats.size());
+		double now = this.position().distanceTo(threatCenter);
+		LivingEntity owner = this.getOwner();
+		return this.planHop(landing -> {
+			double away = landing.distanceTo(threatCenter);
+			if (away < now + HOP_MIN_DISTANCE) {
+				return Double.MAX_VALUE;
+			}
+			// As far from them as it can, and of those the ones nearer its owner.
+			return -away + (owner != null ? 0.25 * landing.distanceTo(owner.position()) : 0.0);
+		}, Double.MAX_VALUE / 2.0);
+	}
+
+	/**
+	 * The best hop there is: every place it could stand within reach (see HOP_MAX_DISTANCE) that costs no more than maxCost,
+	 * cheapest first, until one has an arc that is clear.
+	 */
+	private @Nullable Hop planHop(ToDoubleFunction<Vec3> cost, double maxCost) {
+		Vec3 here = this.position();
+		BlockPos origin = this.blockPosition();
+		int reach = (int) Math.ceil(HOP_MAX_DISTANCE);
+		List<Spot> spots = new ArrayList<>();
+		for (int dx = -reach; dx <= reach; dx++) {
+			for (int dz = -reach; dz <= reach; dz++) {
+				for (int dy = -HOP_MAX_DROP; dy <= HOP_MAX_RISE; dy++) {
+					Vec3 landing = this.standingSpot(origin.offset(dx, dy, dz));
+					if (landing == null || Math.hypot(landing.x - here.x, landing.z - here.z) > HOP_MAX_DISTANCE
+						|| landing.distanceTo(here) < HOP_MIN_DISTANCE) {
+						continue;
+					}
+					double spotCost = cost.applyAsDouble(landing);
+					if (spotCost <= maxCost) {
+						spots.add(new Spot(spotCost, landing));
+					}
+				}
+			}
+		}
+		spots.sort(Comparator.comparingDouble(Spot::cost));
+		for (int i = 0; i < Math.min(spots.size(), HOP_MAX_TRIES); i++) {
+			Hop hop = this.solveHop(spots.get(i).landing());
+			if (hop != null) {
+				return hop;
+			}
+		}
+		return null;
+	}
+
+	/** Where it would stand with its feet in this block: solid floor that is safe to land on, and room for it. Null if it cannot. */
+	private @Nullable Vec3 standingSpot(BlockPos feet) {
+		Level level = this.level();
+		BlockPos floor = feet.below();
+		BlockState floorState = level.getBlockState(floor);
+		BlockState feetState = level.getBlockState(feet);
+		if (floorState.getCollisionShape(level, floor).isEmpty() || !floorState.getFluidState().isEmpty()
+			|| floorState.is(Blocks.MAGMA_BLOCK) || floorState.is(Blocks.CACTUS) || floorState.is(Blocks.POWDER_SNOW)
+			|| !feetState.getCollisionShape(level, feet).isEmpty() || !feetState.getFluidState().isEmpty()
+			|| feetState.is(BlockTags.FIRE) || feetState.is(Blocks.SWEET_BERRY_BUSH)
+			|| !level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()) {
+			return null;
+		}
+		return Vec3.atBottomCenterOf(feet);
+	}
+
+	/**
+	 * Works out the launch that lands it on a spot after exactly HOP_AIR_TICKS ticks, and checks the whole arc is clear for its
+	 * body. Both come from the table of what a tick of movement does: the sideways speed follows from the distance, and the
+	 * upward speed from the height of the spot against where gravity would have it by then.
+	 */
+	private @Nullable Hop solveHop(Vec3 landing) {
+		Vec3 here = this.position();
+		double dx = landing.x - here.x;
+		double dz = landing.z - here.z;
+		double distance = Math.hypot(dx, dz);
+		double speed = distance / HOP_REACH[HOP_AIR_TICKS];
+		double up = (landing.y - here.y - HOP_SAG[HOP_AIR_TICKS]) / HOP_RISE[HOP_AIR_TICKS];
+		if (up < 0.1 || up > 1.0) {
+			return null;
+		}
+		double dirX = distance < 1.0E-4 ? 0.0 : dx / distance;
+		double dirZ = distance < 1.0E-4 ? 0.0 : dz / distance;
+		AABB body = this.getBoundingBox();
+		// Every half tick along the arc, with a little room so that brushing the floor at the end does not count.
+		for (int half = 1; half <= HOP_AIR_TICKS * 2; half++) {
+			int low = half / 2;
+			int high = Math.min(low + 1, HOP_AIR_TICKS);
+			double frac = (half % 2) * 0.5;
+			double across = Mth.lerp(frac, HOP_REACH[low], HOP_REACH[high]) * speed;
+			double height = Mth.lerp(frac, HOP_RISE[low] * up + HOP_SAG[low], HOP_RISE[high] * up + HOP_SAG[high]);
+			if (!this.level().noCollision(this, body.move(dirX * across, height, dirZ * across).deflate(0.02))) {
+				return null;
+			}
+		}
+		return new Hop(new Vec3(dirX * speed, up, dirZ * speed), landing);
 	}
 
 	@Override
 	public void tick() {
 		super.tick();
 		if (this.level().isClientSide()) {
-			this.bigHopAnimationState.animateWhen(this.isBigHopping(), this.tickCount);
+			this.hopAnimationState.animateWhen(this.isHopping(), this.tickCount);
 			this.tickIdleAnimation();
 			this.readyProgressO = this.readyProgress;
 			boolean ready = this.isAggressive() && this.isHoldingWeapon();
@@ -764,21 +962,15 @@ public class BunnayEntity extends TamableAnimal {
 			this.eatProgressO = this.eatProgress;
 			this.eatProgress = Mth.clamp(this.eatProgress + (this.isEating() ? EAT_RISE : -EAT_FALL), 0.0F, 1.0F);
 		} else {
-			if (this.bigHopCooldown > 0) {
-				this.bigHopCooldown--;
-			}
-			if (this.leapCooldown > 0) {
-				this.leapCooldown--;
-			}
-			if (this.bigHopAnimationTicks > 0 && --this.bigHopAnimationTicks == 0) {
-				this.entityData.set(DATA_BIG_HOPPING, false);
+			if (this.hopCooldown > 0) {
+				this.hopCooldown--;
 			}
 		}
 	}
 
 	/** Starts the idle clip when its timer runs out, if standing still; stops it if the bunnay moves off. */
 	private void tickIdleAnimation() {
-		boolean still = this.onGround() && !this.isInWater() && !this.isBigHopping() && !this.isDancing() && this.hurtTime == 0
+		boolean still = this.onGround() && !this.isInWater() && !this.isHopping() && !this.isDancing() && this.hurtTime == 0
 			&& this.walkAnimation.speed() < 0.02F;
 		if (!still) {
 			this.idleAnimationState.stop();
@@ -810,16 +1002,16 @@ public class BunnayEntity extends TamableAnimal {
 		// Sitting is priority 2, as it is for a wolf: below floating and panicking, above everything else. What used to be
 		// at 2 and below is one number lower in the list for it (the melee goal is 3, and so on).
 		this.goalSelector.addGoal(2, new SitWhenOrderedToGoal(this));
-		// The leap is priority 1 so it can interrupt the chase (the melee goal is 3), and it cannot be interrupted itself.
-		this.goalSelector.addGoal(1, new LeapGoal(this));
+		// The hop is priority 2 so that it can interrupt the chase, the walk to its owner and so on (all lower), and it cannot be
+		// interrupted itself.
+		this.goalSelector.addGoal(2, new HopGoal(this));
 		this.goalSelector.addGoal(3, new DanceGoal(this));
-		this.goalSelector.addGoal(3, new BigHopGoal(this));
 		this.goalSelector.addGoal(3, new BunnayMeleeGoal(this));
 		this.goalSelector.addGoal(4, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(4, new GiveCarrotsGoal(this));
 		this.goalSelector.addGoal(5, new HarvestCarrotsGoal(this));
 		// Follows its owner like a wolf: starts from 10 blocks away and stops 2 blocks from them.
-		this.goalSelector.addGoal(5, new FollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
+		this.goalSelector.addGoal(5, new BunnayFollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
 		this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F));
 		this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -1037,34 +1229,130 @@ public class BunnayEntity extends TamableAnimal {
 		return SoundEvents.RABBIT_DEATH;
 	}
 
-	/**
-	 * Now and then, while walking somewhere, stops to do a big hop. The model's keyframe clip plays while the entity
-	 * is flagged as hopping; this goal times the launch to match it and can't be interrupted until the hop is over.
-	 */
-	private static final class BigHopGoal extends Goal {
+	/** Follows its owner like any pet, and lets the bunnay know when it is doing it (see HopGoal and planTravelHop). */
+	private static final class BunnayFollowOwnerGoal extends FollowOwnerGoal {
 		private final BunnayEntity bunnay;
-		private int ticks;
 
-		BigHopGoal(BunnayEntity bunnay) {
+		BunnayFollowOwnerGoal(BunnayEntity bunnay, double speed, float startDistance, float stopDistance) {
+			super(bunnay, speed, startDistance, stopDistance);
 			this.bunnay = bunnay;
+		}
+
+		@Override
+		public void start() {
+			super.start();
+			this.bunnay.following = true;
+		}
+
+		@Override
+		public void stop() {
+			super.stop();
+			this.bunnay.following = false;
+		}
+	}
+
+	/**
+	 * Carries out one hop: the crouch (facing the way it will go), the launch, the flight, the landing with a thud that
+	 * takes the sideways speed off it, and the squash and recovery that finish the clip. The goals that hop own one of these
+	 * and run it each tick. The animation plays while the flag is set.
+	 */
+	private static final class HopRun {
+		private final BunnayEntity bunnay;
+		/** What to do at the moment of launch, if anything. */
+		private @Nullable Runnable onLaunch;
+		private Hop hop;
+		private int ticks;
+		private boolean landed;
+		private boolean running;
+
+		HopRun(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+		}
+
+		void start(Hop hop) {
+			this.hop = hop;
+			this.ticks = 0;
+			this.landed = false;
+			this.running = true;
+			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_HOPPING, true);
+		}
+
+		void tick() {
+			if (!this.running) {
+				return;
+			}
+			this.ticks++;
+			if (this.ticks <= HOP_TAKEOFF_TICK) {
+				// Crouching, turn to face where it is going.
+				Vec3 way = this.hop.landing().subtract(this.bunnay.position());
+				float yaw = (float) Math.toDegrees(Math.atan2(way.z, way.x)) - 90.0F;
+				this.bunnay.setYRot(yaw);
+				this.bunnay.yBodyRot = yaw;
+				this.bunnay.setYHeadRot(yaw);
+			}
+			if (this.ticks == HOP_TAKEOFF_TICK) {
+				// Worked out again from where it is now, in case it has been nudged since it chose; if it cannot any more, it does not go.
+				Hop launch = this.bunnay.solveHop(this.hop.landing());
+				if (launch == null) {
+					this.stop();
+					return;
+				}
+				this.bunnay.setDeltaMovement(launch.velocity());
+				this.bunnay.needsSync = true;
+				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
+				if (this.onLaunch != null) {
+					this.onLaunch.run();
+				}
+			} else if (!this.landed && this.ticks > HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround()) {
+				this.landed = true;
+				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(0.1, 1.0, 0.1));
+				this.bunnay.playSound(SoundEvents.GENERIC_SMALL_FALL, 0.6F, 1.0F);
+			}
+			if (this.ticks >= HOP_TICKS) {
+				this.stop();
+			}
+		}
+
+		void stop() {
+			if (!this.running) {
+				return;
+			}
+			this.running = false;
+			this.bunnay.entityData.set(DATA_HOPPING, false);
+			this.bunnay.hopCooldown = HOP_COOLDOWN_MIN + this.bunnay.getRandom().nextInt(HOP_COOLDOWN_RANGE);
+		}
+	}
+
+	/**
+	 * Hops towards where it is going, whenever the hop is off cooldown and there is a hop worth making (see planTravelHop).
+	 * It looks every HOP_SCAN_INTERVAL ticks, and it cannot be interrupted once it has started.
+	 */
+	private static final class HopGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private final HopRun run;
+		private Hop plan;
+		private int scanDelay;
+
+		HopGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.run = new HopRun(bunnay);
 			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
 		}
 
 		@Override
 		public boolean canUse() {
-			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
+			if (this.bunnay.hopCooldown > 0 || !this.bunnay.canHopNow() || --this.scanDelay > 0) {
 				return false;
 			}
-			LivingEntity target = this.bunnay.getTarget();
-			return this.bunnay.bigHopCooldown <= 0
-				&& (target == null || !target.isAlive())
-				&& this.bunnay.getNavigation().isInProgress()
-				&& this.bunnay.getRandom().nextInt(BIG_HOP_ODDS) == 0;
+			this.scanDelay = HOP_SCAN_INTERVAL;
+			this.plan = this.bunnay.planTravelHop();
+			return this.plan != null;
 		}
 
 		@Override
 		public boolean canContinueToUse() {
-			return this.ticks < BIG_HOP_TICKS;
+			return this.run.running;
 		}
 
 		@Override
@@ -1079,27 +1367,17 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public void start() {
-			this.ticks = 0;
-			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
+			this.run.start(this.plan);
 		}
 
 		@Override
 		public void tick() {
-			this.ticks++;
-			if (this.ticks == BIG_HOP_TAKEOFF_TICK) {
-				// Forward is the way the bunnay is facing (Minecraft's forward is (-sin yaw, cos yaw)).
-				double yaw = Math.toRadians(this.bunnay.getYRot());
-				this.bunnay.setDeltaMovement(new Vec3(-Math.sin(yaw) * BIG_HOP_FORWARD_SPEED, BIG_HOP_LAUNCH_SPEED, Math.cos(yaw) * BIG_HOP_FORWARD_SPEED));
-				this.bunnay.needsSync = true;
-				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
-			}
+			this.run.tick();
 		}
 
 		@Override
 		public void stop() {
-			this.bunnay.entityData.set(DATA_BIG_HOPPING, false);
-			this.bunnay.bigHopCooldown = BIG_HOP_COOLDOWN;
+			this.run.stop();
 		}
 	}
 
@@ -1165,109 +1443,6 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	/**
-	 * Springs at the target from a distance, with the big hop's crouch, flip and landing. The crouch lasts until the
-	 * takeoff tick, facing the target; then it launches with the forward speed it takes to land about a block short.
-	 * The goal ends as soon as it lands, so the chase resumes right away.
-	 */
-	private static final class LeapGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private int ticks;
-
-		LeapGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
-		}
-
-		@Override
-		public boolean canUse() {
-			LivingEntity target = this.bunnay.getTarget();
-			if (target == null || !target.isAlive() || this.bunnay.leapCooldown > 0 || this.bunnay.isBigHopping()) {
-				return false;
-			}
-			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
-				return false;
-			}
-			double dx = target.getX() - this.bunnay.getX();
-			double dz = target.getZ() - this.bunnay.getZ();
-			double distance = Math.sqrt(dx * dx + dz * dz);
-			return distance >= LEAP_MIN_DISTANCE && distance <= LEAP_MAX_DISTANCE
-				&& Math.abs(target.getY() - this.bunnay.getY()) <= 3.0
-				&& this.bunnay.hasLineOfSight(target)
-				&& this.bunnay.getRandom().nextInt(LEAP_ODDS) == 0;
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			// Done on landing, so the chase starts again at once; the animation's squash and recovery play out by themselves.
-			boolean landed = this.ticks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
-			return this.ticks < BIG_HOP_TICKS && !landed;
-		}
-
-		@Override
-		public boolean isInterruptable() {
-			return false;
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void start() {
-			this.ticks = 0;
-			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
-			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
-		}
-
-		@Override
-		public void tick() {
-			this.ticks++;
-			LivingEntity target = this.bunnay.getTarget();
-			if (target != null && this.ticks <= BIG_HOP_TAKEOFF_TICK) {
-				// Crouching down, turn to face it.
-				this.bunnay.getLookControl().setLookAt(target, 60.0F, 60.0F);
-			}
-			if (this.ticks != BIG_HOP_TAKEOFF_TICK) {
-				return;
-			}
-
-			double forwardX;
-			double forwardZ;
-			double speed;
-			if (target != null && target.isAlive()) {
-				double dx = target.getX() - this.bunnay.getX();
-				double dz = target.getZ() - this.bunnay.getZ();
-				double distance = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
-				forwardX = dx / distance;
-				forwardZ = dz / distance;
-				speed = Math.min(Math.max(distance - LEAP_STOP_SHORT, 0.0) / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
-				// Face the way it is going, so it does not leap sideways.
-				float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
-				this.bunnay.setYRot(yaw);
-				this.bunnay.yBodyRot = yaw;
-				this.bunnay.setYHeadRot(yaw);
-			} else {
-				// The target died or went away mid-crouch: just hop the way it is facing.
-				double yaw = Math.toRadians(this.bunnay.getYRot());
-				forwardX = -Math.sin(yaw);
-				forwardZ = Math.cos(yaw);
-				speed = BIG_HOP_FORWARD_SPEED;
-			}
-			this.bunnay.setDeltaMovement(new Vec3(forwardX * speed, BIG_HOP_LAUNCH_SPEED, forwardZ * speed));
-			this.bunnay.needsSync = true;
-			this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
-		}
-
-		@Override
-		public void stop() {
-			// The animation flag is cleared by the entity's timer, not here, so the clip is not cut short.
-			this.bunnay.leapCooldown = LEAP_COOLDOWN;
-		}
-	}
-
 	/** The usual melee goal, except that it may swing a little before the cooldown is up (see ATTACK_HEAD_START_TICKS). */
 	private static final class BunnayMeleeGoal extends MeleeAttackGoal {
 		BunnayMeleeGoal(BunnayEntity bunnay) {
@@ -1281,19 +1456,24 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/**
-	 * Breaks off a fight to heal. First it springs away from the enemies (the big hop, aimed at open ground away from
-	 * them); then it holds still, which is when tickEating gets to eat its carrots. If an enemy that is after it gets
+	 * Breaks off a fight to heal. First it hops away from the enemies (to open ground, as far from them as it can reach); then it holds still, which is when tickEating gets to eat its carrots. If an enemy that is after it gets
 	 * close while it recovers, it springs away again, a few times at most. If it is in water it can do none of that, so
 	 * it swims for the nearest shore first (away from the enemies if it can), and the rest follows once it is out.
 	 */
 	private static final class RetreatGoal extends Goal {
 		private final BunnayEntity bunnay;
-		private boolean jumping;
-		private int jumpTicks;
-		private Vec3 jumpDirection = Vec3.ZERO;
+		private final HopRun hop;
 
 		RetreatGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
+			this.hop = new HopRun(bunnay);
+			// A puff of smoke where it leaves, and everything that was after it loses it.
+			this.hop.onLaunch = () -> {
+				if (bunnay.level() instanceof ServerLevel level) {
+					level.sendParticles(ParticleTypes.POOF, bunnay.getX(), bunnay.getY() + 0.3, bunnay.getZ(), 12, 0.3, 0.1, 0.3, 0.05);
+				}
+				bunnay.dropAggro();
+			};
 			// No JUMP flag: that is what FloatGoal uses to keep it afloat, and it must keep running while it swims out.
 			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
 		}
@@ -1315,14 +1495,18 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public void start() {
-			this.jumping = false;
 			this.bunnay.getNavigation().stop();
 		}
 
 		@Override
+		public void stop() {
+			this.hop.stop();
+		}
+
+		@Override
 		public void tick() {
-			if (this.jumping) {
-				this.tickJump();
+			if (this.hop.running) {
+				this.hop.tick();
 				return;
 			}
 			if (this.bunnay.isInWater()) {
@@ -1389,7 +1573,7 @@ public class BunnayEntity extends TamableAnimal {
 		}
 
 		private boolean canJump() {
-			return this.bunnay.onGround() && !this.bunnay.isInWater() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+			return this.bunnay.onGround() && !this.bunnay.isInWater() && !this.bunnay.isHopping() && !this.bunnay.isPassenger()
 				&& !this.bunnay.isInSittingPose() && !this.bunnay.isDancing();
 		}
 
@@ -1404,100 +1588,19 @@ public class BunnayEntity extends TamableAnimal {
 		}
 
 		private void startJump() {
-			this.jumping = true;
-			this.jumpTicks = 0;
+			// Away from the enemies; if there is nowhere it can hop to, it stays put and eats.
+			Hop plan = this.bunnay.planFleeHop();
+			if (plan == null) {
+				return;
+			}
 			this.bunnay.retreatJumps++;
 			if (this.bunnay.isEating()) {
 				this.bunnay.stopEating();
 			}
-			this.jumpDirection = this.chooseDirection();
-			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
-			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
+			this.hop.start(plan);
 		}
 
-		private void tickJump() {
-			this.jumpTicks++;
-			// Crouching, turn to face the way it will go.
-			if (this.jumpTicks <= BIG_HOP_TAKEOFF_TICK) {
-				float yaw = (float) Math.toDegrees(Math.atan2(this.jumpDirection.z, this.jumpDirection.x)) - 90.0F;
-				this.bunnay.setYRot(yaw);
-				this.bunnay.yBodyRot = yaw;
-				this.bunnay.setYHeadRot(yaw);
-			}
-			if (this.jumpTicks == BIG_HOP_TAKEOFF_TICK) {
-				double speed = Math.min(RETREAT_JUMP_DISTANCE / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
-				this.bunnay.setDeltaMovement(new Vec3(this.jumpDirection.x * speed, BIG_HOP_LAUNCH_SPEED, this.jumpDirection.z * speed));
-				this.bunnay.needsSync = true;
-				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
-				// A puff of smoke where it leaves, and everything that was after it loses it.
-				if (this.bunnay.level() instanceof ServerLevel level) {
-					level.sendParticles(ParticleTypes.POOF, this.bunnay.getX(), this.bunnay.getY() + 0.3, this.bunnay.getZ(), 12, 0.3, 0.1, 0.3, 0.05);
-				}
-				this.bunnay.dropAggro();
-			}
-			boolean landed = this.jumpTicks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
-			if (landed || this.jumpTicks >= BIG_HOP_TICKS) {
-				this.jumping = false;
-			}
-		}
-
-		/**
-		 * Which way to jump: away from the enemies, but swung to either side if the way straight away has no safe place to land,
-		 * and among the safe ways the one that ends nearest its owner.
-		 */
-		private Vec3 chooseDirection() {
-			Vec3 here = this.bunnay.position();
-			Vec3 threatCenter = Vec3.ZERO;
-			List<Mob> threats = this.bunnay.nearbyThreats();
-			for (Mob mob : threats) {
-				threatCenter = threatCenter.add(mob.position());
-			}
-			Vec3 away;
-			if (threats.isEmpty()) {
-				double yaw = Math.toRadians(this.bunnay.getYRot());
-				away = new Vec3(Math.sin(yaw), 0.0, -Math.cos(yaw));
-			} else {
-				away = here.subtract(threatCenter.scale(1.0 / threats.size())).multiply(1.0, 0.0, 1.0);
-				away = away.lengthSqr() < 1.0E-4 ? new Vec3(1.0, 0.0, 0.0) : away.normalize();
-			}
-
-			LivingEntity owner = this.bunnay.getOwner();
-			Vec3 best = null;
-			double bestScore = Double.MAX_VALUE;
-			for (double degrees : new double[]{0, 30, -30, 60, -60, 90, -90, 130, -130}) {
-				double radians = Math.toRadians(degrees);
-				Vec3 dir = new Vec3(away.x * Math.cos(radians) - away.z * Math.sin(radians), 0.0, away.x * Math.sin(radians) + away.z * Math.cos(radians));
-				Vec3 landing = here.add(dir.scale(RETREAT_JUMP_DISTANCE));
-				if (!this.pathClear(here, dir) || !this.safeLanding(landing)) {
-					continue;
-				}
-				double score = owner != null ? landing.distanceToSqr(owner.position()) : Math.abs(degrees);
-				if (score < bestScore) {
-					bestScore = score;
-					best = dir;
-				}
-			}
-			return best != null ? best : away;
-		}
-
-		/** Nothing solid in the way at body height along the first stretch of the jump. */
-		private boolean pathClear(Vec3 from, Vec3 dir) {
-			for (double along = 1.5; along <= RETREAT_JUMP_DISTANCE; along += 1.5) {
-				BlockPos pos = BlockPos.containing(from.x + dir.x * along, from.y + 1.0, from.z + dir.z * along);
-				if (!this.bunnay.level().getBlockState(pos).getCollisionShape(this.bunnay.level(), pos).isEmpty()) {
-					return false;
-				}
-			}
-			return true;
-		}
-
-		/** Solid ground to stand on within a few blocks up or down of here, with room above it, and no water or lava. */
-		private boolean safeLanding(Vec3 point) {
-			return this.landingAt(point) != null;
-		}
-
-		/** Where it would stand if it came down at this point (see safeLanding), or null if there is nowhere safe. */
+		/** Where it would stand if it came down at this point, within a few blocks up or down: solid floor, room above it, no water, lava or magma. Null if there is nowhere safe. */
 		private Vec3 landingAt(Vec3 point) {
 			Level level = this.bunnay.level();
 			for (int dy = 2; dy >= -4; dy--) {
@@ -1554,7 +1657,7 @@ public class BunnayEntity extends TamableAnimal {
 		private boolean freeToWork() {
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
-				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isHopping() && !this.bunnay.isPassenger()
 				&& (target == null || !target.isAlive());
 		}
 
@@ -1798,7 +1901,7 @@ public class BunnayEntity extends TamableAnimal {
 		private boolean shouldGive() {
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
-				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isHopping() && !this.bunnay.isPassenger()
 				&& (target == null || !target.isAlive())
 				&& this.bunnay.carrotsToGive() > 0 && this.bunnay.hungryOwner() != null;
 		}
