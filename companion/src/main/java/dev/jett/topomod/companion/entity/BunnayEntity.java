@@ -1,7 +1,9 @@
 package dev.jett.topomod.companion.entity;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
@@ -46,6 +48,8 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.FollowOwnerGoal;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.ai.goal.WrappedGoal;
+import net.minecraft.world.entity.ai.goal.GoalSelector;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
@@ -53,6 +57,7 @@ import net.minecraft.world.entity.ai.goal.SitWhenOrderedToGoal;
 import net.minecraft.world.entity.ai.goal.TemptGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.ai.goal.target.TargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.OwnerHurtTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
@@ -185,6 +190,21 @@ public class BunnayEntity extends TamableAnimal {
 	private static final double RETREAT_SEARCH_RADIUS = 14.0;
 	/** The wait after a retreat before it can start another, in ticks. */
 	private static final int RETREAT_COOLDOWN = 60;
+	/** How far from it enemies are made to forget it, in blocks (further than they could be chasing it from). */
+	private static final double RETREAT_FORGET_RADIUS = 32.0;
+	/** While it retreats, enemies are made to forget it again this often, in ticks. */
+	private static final int RETREAT_FORGET_INTERVAL = 5;
+
+	// DEBUG: logs everything about a retreat to the game log, lines starting with "[bunnay retreat". It records which mobs are
+	// after the bunnay and which of their goals are running, every time one picks the bunnay up again after being made to
+	// forget it, and every hit the bunnay takes during the retreat. Set this to false (or delete the logging) when done.
+	private static final boolean RETREAT_DEBUG = true;
+	private static final java.lang.reflect.Field GOAL_SELECTOR_FIELD = selectorField("goalSelector");
+	private static final java.lang.reflect.Field TARGET_SELECTOR_FIELD = selectorField("targetSelector");
+	private static int nextRetreatId = 1;
+	private int retreatId;
+	/** For each mob made to forget it, the retreat tick it was cleared at, so a mob that picks it up again can be spotted. */
+	private final Map<Integer, Integer> clearedAt = new HashMap<>();
 
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
@@ -350,6 +370,81 @@ public class BunnayEntity extends TamableAnimal {
 		return held.isEmpty() || (held.is(Items.CARROT) && held.getCount() < held.getMaxStackSize());
 	}
 
+	private static java.lang.reflect.Field selectorField(String name) {
+		try {
+			java.lang.reflect.Field field = Mob.class.getDeclaredField(name);
+			field.setAccessible(true);
+			return field;
+		} catch (ReflectiveOperationException e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Stops the target goals a mob is running (the one that picked its target). Clearing the mob's target is not enough: a
+	 * running target goal keeps its own copy of the target, and the next tick it sees that the mob has none and puts that
+	 * copy back. Stopping the goal clears that copy too (TargetGoal.stop), and it does not start again unless the mob
+	 * is hurt again or finds something else to go for.
+	 */
+	private static void stopRunningTargetGoals(Mob mob) {
+		if (TARGET_SELECTOR_FIELD == null) {
+			return;
+		}
+		try {
+			for (WrappedGoal wrapped : ((GoalSelector) TARGET_SELECTOR_FIELD.get(mob)).getAvailableGoals()) {
+				if (wrapped.isRunning() && wrapped.getGoal() instanceof TargetGoal) {
+					if (RETREAT_DEBUG) {
+						CompanionMod.LOGGER.info("[bunnay retreat] stopping {} on {}", wrapped.getGoal().getClass().getSimpleName(), describe(mob));
+					}
+					wrapped.stop();
+				}
+			}
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			CompanionMod.LOGGER.warn("[bunnay retreat] could not stop target goals on {}", describe(mob), e);
+		}
+	}
+
+	/** DEBUG: the goals that are running in a mob's goal or target selector, as "Name@priority". */
+	private static String runningGoals(Mob mob, java.lang.reflect.Field selectorField) {
+		if (selectorField == null) {
+			return "?";
+		}
+		try {
+			StringBuilder out = new StringBuilder();
+			for (WrappedGoal wrapped : ((GoalSelector) selectorField.get(mob)).getAvailableGoals()) {
+				if (wrapped.isRunning()) {
+					out.append(wrapped.getGoal().getClass().getSimpleName()).append('@').append(wrapped.getPriority()).append(' ');
+				}
+			}
+			return out.toString().trim();
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return "?";
+		}
+	}
+
+	private static String describe(@Nullable Entity entity) {
+		return entity == null ? "none" : entity.getType().toShortString() + "#" + entity.getId();
+	}
+
+	/** DEBUG: one line in the game log about this retreat. */
+	private void retreatLog(String message) {
+		if (RETREAT_DEBUG) {
+			CompanionMod.LOGGER.info("[bunnay retreat #{} t={} hp={}/{}] {}", this.retreatId, this.retreatTicks, String.format("%.1f", this.getHealth()),
+				String.format("%.0f", this.getMaxHealth()), message);
+		}
+	}
+
+	/** DEBUG: every enemy within 14 blocks, who it is after, how far away, and what its target goals are doing. */
+	private void logSurroundings(String why) {
+		if (!RETREAT_DEBUG) {
+			return;
+		}
+		for (Mob mob : this.level().getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(14.0), m -> m != this && m instanceof Enemy && m.isAlive())) {
+			this.retreatLog(why + ": " + describe(mob) + " dist=" + String.format("%.1f", Math.sqrt(mob.distanceToSqr(this))) + " target=" + describe(mob.getTarget())
+				+ " lastHurtBy=" + describe(mob.getLastHurtByMob()) + " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]");
+		}
+	}
+
 	/** Hurt enough to want to get out, with a carrot to eat once it has, and in a fight right now. */
 	private boolean wantsToRetreat() {
 		LivingEntity target = this.getTarget();
@@ -373,9 +468,18 @@ public class BunnayEntity extends TamableAnimal {
 		}
 
 		this.retreatTicks++;
+		// A mob can pick it up again (a group alerted by one that was hit, an anger that runs on its own timer), so keep
+		// making them forget it for as long as it recovers.
+		if (this.retreatTicks % RETREAT_FORGET_INTERVAL == 0) {
+			this.makeEnemiesForget();
+		}
+		if (RETREAT_DEBUG && this.retreatTicks % 20 == 0) {
+			this.logSurroundings("snapshot");
+		}
 		boolean healed = this.getMaxHealth() - this.getHealth() < EAT_KEEP_GOING_MISSING_HEALTH;
 		boolean outOfFood = !isCarrot(this.food.getItem(0)) && !this.isEating();
 		if (healed || outOfFood || this.retreatTicks > RETREAT_MAX_TICKS || this.isOrderedToSit() || !this.isAlive()) {
+			this.retreatLog("END healed=" + healed + " outOfFood=" + outOfFood + " timedOut=" + (this.retreatTicks > RETREAT_MAX_TICKS) + " sitting=" + this.isOrderedToSit());
 			this.endRetreat(healed);
 		}
 	}
@@ -385,6 +489,10 @@ public class BunnayEntity extends TamableAnimal {
 		this.retreatTicks = 0;
 		this.retreatJumps = 0;
 		this.eatCooldown = 0;
+		this.retreatId = nextRetreatId++;
+		this.clearedAt.clear();
+		this.retreatLog("START target=" + describe(this.getTarget()) + " lastHurtBy=" + describe(this.getLastHurtByMob()) + " food=" + this.food.getItem(0));
+		this.logSurroundings("at start");
 		this.dropAggro();
 	}
 
@@ -421,9 +529,34 @@ public class BunnayEntity extends TamableAnimal {
 	private void dropAggro() {
 		this.setTarget(null);
 		this.setLastHurtByMob(null);
-		for (Mob mob : this.level().getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(RETREAT_SEARCH_RADIUS), m -> m != this && m.getTarget() == this)) {
-			mob.setTarget(null);
-			mob.getNavigation().stop();
+		this.makeEnemiesForget();
+	}
+
+	/**
+	 * Every mob nearby that is targeting it, or remembers it as what hurt it (which is what makes a mob hit back), lets go.
+	 * They only go after it again if it hits them again.
+	 */
+	private void makeEnemiesForget() {
+		for (Mob mob : this.level().getEntitiesOfClass(
+			Mob.class,
+			this.getBoundingBox().inflate(RETREAT_FORGET_RADIUS),
+			m -> m != this && (m.getTarget() == this || m.getLastHurtByMob() == this)
+		)) {
+			if (RETREAT_DEBUG && this.retreating) {
+				Integer before = this.clearedAt.get(mob.getId());
+				this.retreatLog((before != null ? "RE-TARGETED " + (this.retreatTicks - before) + " ticks after being cleared: " : "forgetting: ") + describe(mob)
+					+ " dist=" + String.format("%.1f", Math.sqrt(mob.distanceToSqr(this))) + " target=" + describe(mob.getTarget()) + " lastHurtBy=" + describe(mob.getLastHurtByMob())
+					+ " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]");
+				this.clearedAt.put(mob.getId(), this.retreatTicks);
+			}
+			if (mob.getTarget() == this) {
+				stopRunningTargetGoals(mob);
+				mob.setTarget(null);
+				mob.getNavigation().stop();
+			}
+			if (mob.getLastHurtByMob() == this) {
+				mob.setLastHurtByMob(null);
+			}
 		}
 	}
 
@@ -897,6 +1030,11 @@ public class BunnayEntity extends TamableAnimal {
 	// A hit makes a sitting bunnay stand up, so it can defend itself.
 	@Override
 	public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+		if (RETREAT_DEBUG && this.retreating) {
+			Entity attacker = source.getEntity();
+			this.retreatLog("HIT by " + describe(attacker) + " direct=" + describe(source.getDirectEntity()) + " type=" + source.getMsgId() + " damage=" + String.format("%.1f", damage)
+				+ (attacker instanceof Mob mob ? " attackerTarget=" + describe(mob.getTarget()) + " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]" : ""));
+		}
 		boolean hurt = super.hurtServer(level, source, damage);
 		if (hurt && this.isOrderedToSit()) {
 			this.setOrderedToSit(false);
@@ -1281,6 +1419,8 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.stopEating();
 			}
 			this.jumpDirection = this.chooseDirection();
+			this.bunnay.retreatLog("JUMP #" + this.bunnay.retreatJumps + " direction=(" + String.format("%.2f, %.2f", this.jumpDirection.x, this.jumpDirection.z) + ") from "
+				+ this.bunnay.blockPosition().toShortString() + " threats=" + this.bunnay.nearbyThreats().size());
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
@@ -1309,6 +1449,8 @@ public class BunnayEntity extends TamableAnimal {
 			boolean landed = this.jumpTicks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
 			if (landed || this.jumpTicks >= BIG_HOP_TICKS) {
 				this.jumping = false;
+				this.bunnay.retreatLog("LANDED at " + this.bunnay.blockPosition().toShortString());
+				this.bunnay.logSurroundings("after landing");
 			}
 		}
 
@@ -1477,6 +1619,11 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public void tick() {
+			// The goal can be ticked once more after harvest() has finished with the carrot (it is checked for ending only
+			// every other tick), so there may be nothing left to work on.
+			if (this.crop == null) {
+				return;
+			}
 			this.giveUpTicks++;
 			Vec3 center = Vec3.atCenterOf(this.crop);
 			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
