@@ -1252,8 +1252,8 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/**
-	 * Carries out one hop: the crouch (facing the way it will go), the launch, the flight, the landing with a thud that
-	 * takes the sideways speed off it, and the squash and recovery that finish the clip. The goals that hop own one of these
+	 * Carries out one hop: the crouch (facing the way it will go), the launch, the flight, the landing (silent, which
+	 * takes the sideways speed off it), and the squash and recovery that finish the clip. The goals that hop own one of these
 	 * and run it each tick. The animation plays while the flag is set.
 	 */
 	private static final class HopRun {
@@ -1307,7 +1307,6 @@ public class BunnayEntity extends TamableAnimal {
 			} else if (!this.landed && this.ticks > HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround()) {
 				this.landed = true;
 				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(0.1, 1.0, 0.1));
-				this.bunnay.playSound(SoundEvents.GENERIC_SMALL_FALL, 0.6F, 1.0F);
 			}
 			if (this.ticks >= HOP_TICKS) {
 				this.stop();
