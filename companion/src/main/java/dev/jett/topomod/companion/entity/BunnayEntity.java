@@ -796,9 +796,6 @@ public class BunnayEntity extends TamableAnimal {
 			.add(Attributes.MAX_HEALTH, WILD_HEALTH)
 			.add(Attributes.MOVEMENT_SPEED, 0.3)
 			.add(Attributes.ATTACK_DAMAGE, 3.0)
-			// Its ordinary jump, the one it does by itself to get up a ledge: 0.5 is about 1.7 blocks high (the usual 0.42 is
-			// 1.25). The big hop and the leap set their own launch speed and are not affected.
-			.add(Attributes.JUMP_STRENGTH, 0.5)
 			// Swimming speed. A land mob moves at a crawl in water (about 1.6 blocks a second for this one); the water movement
 			// efficiency attribute (what Depth Strider sets, 0 to 1) closes that gap. 0.4 is about 2.8 times as fast, 4.5 blocks a
 			// second, roughly a walking pace; 0.2 is 2.1 times and 0.6 is 3.4 times.
