@@ -17,6 +17,7 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 
 	public BunnayRenderer(EntityRendererProvider.Context context) {
 		super(context, new BunnayModel(context.bakeLayer(LAYER)), 0.3F);
+		this.addLayer(new BunnayEyesLayer(this));
 		this.addLayer(new BunnayItemLayer(this));
 	}
 
