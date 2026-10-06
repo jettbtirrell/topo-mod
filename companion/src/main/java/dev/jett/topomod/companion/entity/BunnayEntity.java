@@ -1,9 +1,7 @@
 package dev.jett.topomod.companion.entity;
 
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
@@ -65,8 +63,11 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.Ghast;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.animal.equine.AbstractHorse;
+import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import dev.jett.topomod.companion.CompanionMod;
@@ -186,16 +187,7 @@ public class BunnayEntity extends TamableAnimal {
 	/** While it retreats, enemies are made to forget it again this often, in ticks. */
 	private static final int RETREAT_FORGET_INTERVAL = 5;
 
-	// DEBUG: logs everything about a retreat to the game log, lines starting with "[bunnay retreat". It records which mobs are
-	// after the bunnay and which of their goals are running, every time one picks the bunnay up again after being made to
-	// forget it, and every hit the bunnay takes during the retreat. Set this to false (or delete the logging) when done.
-	private static final boolean RETREAT_DEBUG = true;
-	private static final java.lang.reflect.Field GOAL_SELECTOR_FIELD = selectorField("goalSelector");
 	private static final java.lang.reflect.Field TARGET_SELECTOR_FIELD = selectorField("targetSelector");
-	private static int nextRetreatId = 1;
-	private int retreatId;
-	/** For each mob made to forget it, the retreat tick it was cleared at, so a mob that picks it up again can be spotted. */
-	private final Map<Integer, Integer> clearedAt = new HashMap<>();
 
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
@@ -258,17 +250,22 @@ public class BunnayEntity extends TamableAnimal {
 	 */
 	private final SimpleContainer food = new SimpleContainer(1);
 
-	// Riding in its owner's boat. It gets in when its owner is in a boat with room and it is close enough to reach it, and it
-	// gets out a moment after its owner does, so it is not left in the boat. (A boat with no player driving it picks up
-	// small mobs that bump into it, with no help from here, as with any mob.)
-	/** How far from the boat it will go to get in, in blocks, and how long it keeps trying (in ticks). */
-	private static final double BOAT_BOARD_RANGE = 12.0;
-	private static final int BOAT_BOARD_GIVE_UP_TICKS = 200;
-	/** It is close enough to climb in when it is within this many blocks of the boat. */
-	private static final double BOAT_REACH = 2.6;
-	/** It gets out of a boat its owner is no longer in after this many ticks, so a moment of the owner shifting seats is not enough. */
-	private static final int BOAT_ABANDONED_TICKS = 20;
-	private int boatAbandonedTicks;
+	// Giving carrots to a hungry owner, the way an allay hands items to the player it likes: when its owner is hungry and in
+	// sight it walks over and tosses some of the carrots from its food slot to them. It keeps GIFT_KEEP_CARROTS for itself,
+	// so it can still heal, and waits a long while before it does it again.
+	/** The owner is hungry at or below this food level: the point where they can no longer sprint (three drumsticks). */
+	private static final int GIFT_HUNGRY_AT = 6;
+	private static final int GIFT_MAX_CARROTS = 5;
+	private static final int GIFT_KEEP_CARROTS = 1;
+	/** The wait after a gift, in ticks (10 minutes). */
+	private static final int GIFT_COOLDOWN_TICKS = 12000;
+	/** How close its owner has to be, in blocks, for it to notice they are hungry, and how close it gets to give. */
+	private static final double GIFT_NOTICE_RANGE = 12.0;
+	private static final double GIFT_REACH = 2.5;
+	/** It gives up reaching its owner after this many ticks, and tries again after GIFT_RETRY_TICKS. */
+	private static final int GIFT_GIVE_UP_TICKS = 200;
+	private static final int GIFT_RETRY_TICKS = 200;
+	private int giftCooldown;
 
 	// Retreating to heal (server side only).
 	private boolean retreating;
@@ -283,7 +280,6 @@ public class BunnayEntity extends TamableAnimal {
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
 	private int bigHopCooldown;
-	private boolean forceBigHop;
 	private int leapCooldown;
 	/** Ticks left of the big hop animation; the leap ends its goal on landing but lets the clip play out. */
 	private int bigHopAnimationTicks;
@@ -321,12 +317,14 @@ public class BunnayEntity extends TamableAnimal {
 	protected void addAdditionalSaveData(ValueOutput output) {
 		super.addAdditionalSaveData(output);
 		output.store("Food", ItemStack.OPTIONAL_CODEC, this.food.getItem(0));
+		output.putInt("GiftCooldown", this.giftCooldown);
 	}
 
 	@Override
 	protected void readAdditionalSaveData(ValueInput input) {
 		super.readAdditionalSaveData(input);
 		input.read("Food", ItemStack.OPTIONAL_CODEC).ifPresent(stack -> this.food.setItem(0, stack));
+		this.giftCooldown = input.getIntOr("GiftCooldown", 0);
 	}
 
 	// The carrots in its food slot are dropped when it dies, like what it is holding.
@@ -375,6 +373,21 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/** Whether another ordinary carrot would fit in the food slot (it is empty, or holds carrots with room; golden ones do not mix). */
+	/** How many carrots it would give right now: up to GIFT_MAX_CARROTS of the ordinary ones in its food slot, keeping GIFT_KEEP_CARROTS. */
+	private int carrotsToGive() {
+		ItemStack held = this.food.getItem(0);
+		return held.is(Items.CARROT) ? Math.max(0, Math.min(GIFT_MAX_CARROTS, held.getCount() - GIFT_KEEP_CARROTS)) : 0;
+	}
+
+	/** Its owner, if they are hungry, close and in sight, so that it notices. */
+	private @Nullable ServerPlayer hungryOwner() {
+		if (!(this.getOwner() instanceof ServerPlayer owner) || !owner.isAlive() || owner.isSpectator() || owner.level() != this.level()) {
+			return null;
+		}
+		boolean hungry = owner.getFoodData().getFoodLevel() <= GIFT_HUNGRY_AT;
+		return hungry && this.distanceToSqr(owner) <= GIFT_NOTICE_RANGE * GIFT_NOTICE_RANGE && this.hasLineOfSight(owner) ? owner : null;
+	}
+
 	private boolean canTakeCarrots() {
 		ItemStack held = this.food.getItem(0);
 		return held.isEmpty() || (held.is(Items.CARROT) && held.getCount() < held.getMaxStackSize());
@@ -403,55 +416,11 @@ public class BunnayEntity extends TamableAnimal {
 		try {
 			for (WrappedGoal wrapped : ((GoalSelector) TARGET_SELECTOR_FIELD.get(mob)).getAvailableGoals()) {
 				if (wrapped.isRunning() && wrapped.getGoal() instanceof TargetGoal) {
-					if (RETREAT_DEBUG) {
-						CompanionMod.LOGGER.info("[bunnay retreat] stopping {} on {}", wrapped.getGoal().getClass().getSimpleName(), describe(mob));
-					}
 					wrapped.stop();
 				}
 			}
 		} catch (ReflectiveOperationException | RuntimeException e) {
-			CompanionMod.LOGGER.warn("[bunnay retreat] could not stop target goals on {}", describe(mob), e);
-		}
-	}
-
-	/** DEBUG: the goals that are running in a mob's goal or target selector, as "Name@priority". */
-	private static String runningGoals(Mob mob, java.lang.reflect.Field selectorField) {
-		if (selectorField == null) {
-			return "?";
-		}
-		try {
-			StringBuilder out = new StringBuilder();
-			for (WrappedGoal wrapped : ((GoalSelector) selectorField.get(mob)).getAvailableGoals()) {
-				if (wrapped.isRunning()) {
-					out.append(wrapped.getGoal().getClass().getSimpleName()).append('@').append(wrapped.getPriority()).append(' ');
-				}
-			}
-			return out.toString().trim();
-		} catch (ReflectiveOperationException | RuntimeException e) {
-			return "?";
-		}
-	}
-
-	private static String describe(@Nullable Entity entity) {
-		return entity == null ? "none" : entity.getType().toShortString() + "#" + entity.getId();
-	}
-
-	/** DEBUG: one line in the game log about this retreat. */
-	private void retreatLog(String message) {
-		if (RETREAT_DEBUG) {
-			CompanionMod.LOGGER.info("[bunnay retreat #{} t={} hp={}/{}] {}", this.retreatId, this.retreatTicks, String.format("%.1f", this.getHealth()),
-				String.format("%.0f", this.getMaxHealth()), message);
-		}
-	}
-
-	/** DEBUG: every enemy within 14 blocks, who it is after, how far away, and what its target goals are doing. */
-	private void logSurroundings(String why) {
-		if (!RETREAT_DEBUG) {
-			return;
-		}
-		for (Mob mob : this.level().getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(14.0), m -> m != this && m instanceof Enemy && m.isAlive())) {
-			this.retreatLog(why + ": " + describe(mob) + " dist=" + String.format("%.1f", Math.sqrt(mob.distanceToSqr(this))) + " target=" + describe(mob.getTarget())
-				+ " lastHurtBy=" + describe(mob.getLastHurtByMob()) + " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]");
+			CompanionMod.LOGGER.warn("Could not stop target goals on {}", mob, e);
 		}
 	}
 
@@ -483,13 +452,9 @@ public class BunnayEntity extends TamableAnimal {
 		if (this.retreatTicks % RETREAT_FORGET_INTERVAL == 0) {
 			this.makeEnemiesForget();
 		}
-		if (RETREAT_DEBUG && this.retreatTicks % 20 == 0) {
-			this.logSurroundings("snapshot");
-		}
 		boolean healed = this.getMaxHealth() - this.getHealth() < EAT_KEEP_GOING_MISSING_HEALTH;
 		boolean outOfFood = !isCarrot(this.food.getItem(0)) && !this.isEating();
 		if (healed || outOfFood || this.retreatTicks > RETREAT_MAX_TICKS || this.isOrderedToSit() || !this.isAlive()) {
-			this.retreatLog("END healed=" + healed + " outOfFood=" + outOfFood + " timedOut=" + (this.retreatTicks > RETREAT_MAX_TICKS) + " sitting=" + this.isOrderedToSit());
 			this.endRetreat(healed);
 		}
 	}
@@ -499,10 +464,6 @@ public class BunnayEntity extends TamableAnimal {
 		this.retreatTicks = 0;
 		this.retreatJumps = 0;
 		this.eatCooldown = 0;
-		this.retreatId = nextRetreatId++;
-		this.clearedAt.clear();
-		this.retreatLog("START target=" + describe(this.getTarget()) + " lastHurtBy=" + describe(this.getLastHurtByMob()) + " food=" + this.food.getItem(0));
-		this.logSurroundings("at start");
 		this.dropAggro();
 	}
 
@@ -552,13 +513,6 @@ public class BunnayEntity extends TamableAnimal {
 			this.getBoundingBox().inflate(RETREAT_FORGET_RADIUS),
 			m -> m != this && (m.getTarget() == this || m.getLastHurtByMob() == this)
 		)) {
-			if (RETREAT_DEBUG && this.retreating) {
-				Integer before = this.clearedAt.get(mob.getId());
-				this.retreatLog((before != null ? "RE-TARGETED " + (this.retreatTicks - before) + " ticks after being cleared: " : "forgetting: ") + describe(mob)
-					+ " dist=" + String.format("%.1f", Math.sqrt(mob.distanceToSqr(this))) + " target=" + describe(mob.getTarget()) + " lastHurtBy=" + describe(mob.getLastHurtByMob())
-					+ " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]");
-				this.clearedAt.put(mob.getId(), this.retreatTicks);
-			}
 			if (mob.getTarget() == this) {
 				stopRunningTargetGoals(mob);
 				mob.setTarget(null);
@@ -619,21 +573,6 @@ public class BunnayEntity extends TamableAnimal {
 			this.eatTicks = 0;
 			this.entityData.set(DATA_EATING_FOOD, stack.copyWithCount(1));
 			this.entityData.set(DATA_EATING, true);
-		}
-	}
-
-	/** Gets out of a boat once its owner is not in it any more (or has gone): see BOAT_ABANDONED_TICKS. */
-	private void tickBoatRide() {
-		if (!(this.getVehicle() instanceof AbstractBoat boat)) {
-			this.boatAbandonedTicks = 0;
-			return;
-		}
-		LivingEntity owner = this.getOwner();
-		if (owner != null && owner.getVehicle() == boat) {
-			this.boatAbandonedTicks = 0;
-		} else if (++this.boatAbandonedTicks >= BOAT_ABANDONED_TICKS) {
-			this.stopRiding();
-			this.boatAbandonedTicks = 0;
 		}
 	}
 
@@ -798,18 +737,15 @@ public class BunnayEntity extends TamableAnimal {
 		if (!this.level().isClientSide()) {
 			this.tickRetreat();
 			this.tickEating();
-			this.tickBoatRide();
+			if (this.giftCooldown > 0) {
+				this.giftCooldown--;
+			}
 		}
 		if (!this.level().isClientSide() && this.isDancing() && this.shouldStopDancing() && this.tickCount % 20 == 0) {
 			this.jukeboxPos = null;
 			this.setDancing(false);
 		}
 
-	}
-
-	// DEBUG: used by TopoDebugCommand to preview the big hop. Remove together with that command.
-	public void debugBigHop() {
-		this.forceBigHop = true;
 	}
 
 	public boolean isBigHopping() {
@@ -873,20 +809,23 @@ public class BunnayEntity extends TamableAnimal {
 	protected void registerGoals() {
 		this.goalSelector.addGoal(0, new RetreatGoal(this));
 		this.goalSelector.addGoal(1, new FloatGoal(this));
-		this.goalSelector.addGoal(1, new SitWhenOrderedToGoal(this));
 		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
-		this.goalSelector.addGoal(2, new DanceGoal(this));
-		// The leap is priority 1 so it can interrupt the chase (the melee goal is 2), and it cannot be interrupted itself.
+		// Sitting is priority 2, as it is for a wolf: below floating and panicking, above everything else. What used to be
+		// at 2 and below is one number lower in the list for it (the melee goal is 3, and so on).
+		this.goalSelector.addGoal(2, new SitWhenOrderedToGoal(this));
+		// The leap is priority 1 so it can interrupt the chase (the melee goal is 3), and it cannot be interrupted itself.
 		this.goalSelector.addGoal(1, new LeapGoal(this));
-		this.goalSelector.addGoal(2, new BigHopGoal(this));
-		this.goalSelector.addGoal(2, new BunnayMeleeGoal(this));
-		this.goalSelector.addGoal(3, new BoardBoatGoal(this));
-		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
-		this.goalSelector.addGoal(4, new HarvestCarrotsGoal(this));
-		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
-		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
-		this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
-		this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
+		this.goalSelector.addGoal(3, new DanceGoal(this));
+		this.goalSelector.addGoal(3, new BigHopGoal(this));
+		this.goalSelector.addGoal(3, new BunnayMeleeGoal(this));
+		this.goalSelector.addGoal(4, new TemptGoal(this, 1.0, this::isFood, false));
+		this.goalSelector.addGoal(4, new GiveCarrotsGoal(this));
+		this.goalSelector.addGoal(5, new HarvestCarrotsGoal(this));
+		// Follows its owner like a wolf: starts from 10 blocks away and stops 2 blocks from them.
+		this.goalSelector.addGoal(5, new FollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
+		this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 0.8));
+		this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F));
+		this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
 
 		// Fights like a wolf: defends its owner, backs up the owner's attacks, and retaliates when hurt.
 		this.targetSelector.addGoal(1, new OwnerHurtByTargetGoal(this));
@@ -894,16 +833,24 @@ public class BunnayEntity extends TamableAnimal {
 		this.targetSelector.addGoal(3, new HurtByTargetGoal(this).setAlertOthers());
 	}
 
+	// What it will go after on its owner's behalf is the wolf's own rule (Wolf.wantsToAttack): never a creeper, a ghast or an
+	// armor stand; another bunnay only if it is wild or belongs to someone else; a player only if player fighting is allowed
+	// between the two; and never a tamed horse or any other tamed pet.
 	@Override
 	public boolean wantsToAttack(LivingEntity target, LivingEntity owner) {
-		// Don't pick a fight with a creeper, and never attack the owner or another companion of the same owner.
-		if (target instanceof Creeper) {
+		if (target instanceof Creeper || target instanceof Ghast || target instanceof ArmorStand) {
 			return false;
 		}
-		if (target instanceof TamableAnimal tamable && tamable.isTame() && tamable.getOwner() == owner) {
+		if (target instanceof BunnayEntity other) {
+			return !other.isTame() || other.getOwner() != owner;
+		}
+		if (target instanceof Player player && owner instanceof Player ownerPlayer && !ownerPlayer.canHarmPlayer(player)) {
 			return false;
 		}
-		return target != owner;
+		if (target instanceof AbstractHorse horse && horse.isTamed()) {
+			return false;
+		}
+		return !(target instanceof TamableAnimal tamable && tamable.isTame());
 	}
 
 	@Override
@@ -1017,19 +964,20 @@ public class BunnayEntity extends TamableAnimal {
 		return super.mobInteract(player, hand);
 	}
 
-	// A hit makes a sitting bunnay stand up, so it can defend itself.
+	// Like a wolf, any hit makes a sitting bunnay stand up, so it can defend itself. Unlike a wolf, its owner cannot hurt it
+	// (the hit still stands it up, but does no damage).
 	@Override
 	public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
-		if (RETREAT_DEBUG && this.retreating) {
-			Entity attacker = source.getEntity();
-			this.retreatLog("HIT by " + describe(attacker) + " direct=" + describe(source.getDirectEntity()) + " type=" + source.getMsgId() + " damage=" + String.format("%.1f", damage)
-				+ (attacker instanceof Mob mob ? " attackerTarget=" + describe(mob.getTarget()) + " targetGoals=[" + runningGoals(mob, TARGET_SELECTOR_FIELD) + "] goals=[" + runningGoals(mob, GOAL_SELECTOR_FIELD) + "]" : ""));
+		if (this.isInvulnerableTo(level, source)) {
+			return false;
 		}
-		boolean hurt = super.hurtServer(level, source, damage);
-		if (hurt && this.isOrderedToSit()) {
+		if (this.isOrderedToSit()) {
 			this.setOrderedToSit(false);
 		}
-		return hurt;
+		if (source.getEntity() instanceof LivingEntity attacker && this.isOwnedBy(attacker)) {
+			return false;
+		}
+		return super.hurtServer(level, source, damage);
 	}
 
 	/** Opens the equipment screen; the client is told which bunnay it belongs to via the entity id. */
@@ -1068,7 +1016,7 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	public boolean removeWhenFarAway(double distSqr) {
-		return !this.isTame();
+		return false;
 	}
 
 	// Bunnays come from an allay dancing to the bunny music disc (see BunnayBreeding), not from breeding with each other.
@@ -1110,9 +1058,6 @@ public class BunnayEntity extends TamableAnimal {
 			if (!this.bunnay.onGround() || this.bunnay.isInWater() || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isDancing() || this.bunnay.isInSittingPose()) {
 				return false;
 			}
-			if (this.bunnay.forceBigHop) {
-				return true;
-			}
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.bigHopCooldown <= 0
 				&& (target == null || !target.isAlive())
@@ -1138,7 +1083,6 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.ticks = 0;
-			this.bunnay.forceBigHop = false;
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 		}
@@ -1470,8 +1414,6 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.stopEating();
 			}
 			this.jumpDirection = this.chooseDirection();
-			this.bunnay.retreatLog("JUMP #" + this.bunnay.retreatJumps + " direction=(" + String.format("%.2f, %.2f", this.jumpDirection.x, this.jumpDirection.z) + ") from "
-				+ this.bunnay.blockPosition().toShortString() + " threats=" + this.bunnay.nearbyThreats().size());
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
 			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
@@ -1500,8 +1442,6 @@ public class BunnayEntity extends TamableAnimal {
 			boolean landed = this.jumpTicks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
 			if (landed || this.jumpTicks >= BIG_HOP_TICKS) {
 				this.jumping = false;
-				this.bunnay.retreatLog("LANDED at " + this.bunnay.blockPosition().toShortString());
-				this.bunnay.logSurroundings("after landing");
 			}
 		}
 
@@ -1845,49 +1785,41 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/**
-	 * Climbs into its owner's boat. It runs while its owner is riding a boat that has room, and it is within range and
-	 * not in a fight or sitting: it walks to the boat and, once it is within reach, gets in (the game seats it, as it
-	 * does anything that boards a boat). It gives up after a while, and tries again if the boat is still there.
+	 * Gives carrots to a hungry owner: it walks to them and tosses them the carrots (see the GIFT_ constants). It only does
+	 * it when it has nothing else going on: no fight, not sitting, dancing, eating, retreating or hopping.
 	 */
-	private static final class BoardBoatGoal extends Goal {
+	private static final class GiveCarrotsGoal extends Goal {
 		private final BunnayEntity bunnay;
-		private AbstractBoat boat;
 		private int ticks;
+		private boolean gave;
 
-		BoardBoatGoal(BunnayEntity bunnay) {
+		GiveCarrotsGoal(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
 			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
 		}
 
-		/** The boat its owner is riding, if it is one it could get into right now. */
-		private AbstractBoat boardableBoat() {
-			LivingEntity owner = this.bunnay.getOwner();
+		private boolean shouldGive() {
 			LivingEntity target = this.bunnay.getTarget();
-			if (!this.bunnay.isTame() || owner == null || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isOrderedToSit()
-				|| this.bunnay.isDancing() || this.bunnay.retreating || this.bunnay.isEating() || this.bunnay.isBigHopping()
-				|| (target != null && target.isAlive())) {
-				return null;
-			}
-			if (!(owner.getVehicle() instanceof AbstractBoat found) || !found.hasEnoughSpaceFor(this.bunnay)) {
-				return null;
-			}
-			return this.bunnay.distanceToSqr(found) <= BOAT_BOARD_RANGE * BOAT_BOARD_RANGE ? found : null;
+			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
+				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+				&& (target == null || !target.isAlive())
+				&& this.bunnay.carrotsToGive() > 0 && this.bunnay.hungryOwner() != null;
 		}
 
 		@Override
 		public boolean canUse() {
-			this.boat = this.boardableBoat();
-			return this.boat != null;
+			return this.bunnay.giftCooldown <= 0 && this.shouldGive();
 		}
 
 		@Override
 		public boolean canContinueToUse() {
-			return this.ticks < BOAT_BOARD_GIVE_UP_TICKS && this.boardableBoat() == this.boat;
+			return !this.gave && this.ticks < GIFT_GIVE_UP_TICKS && this.shouldGive();
 		}
 
 		@Override
 		public void start() {
 			this.ticks = 0;
+			this.gave = false;
 		}
 
 		@Override
@@ -1897,23 +1829,29 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public void tick() {
-			this.ticks++;
-			this.bunnay.getLookControl().setLookAt(this.boat, 30.0F, 30.0F);
-			if (this.bunnay.distanceToSqr(this.boat) <= BOAT_REACH * BOAT_REACH) {
-				// Close enough: in it gets. startRiding checks there is room, and says no if there is not.
-				if (this.bunnay.startRiding(this.boat)) {
-					this.bunnay.getNavigation().stop();
-				}
+			ServerPlayer owner = this.bunnay.hungryOwner();
+			if (owner == null) {
 				return;
 			}
-			if (this.ticks % 10 == 1) {
-				this.bunnay.getNavigation().moveTo(this.boat, 1.2);
+			this.ticks++;
+			this.bunnay.getLookControl().setLookAt(owner, 30.0F, 30.0F);
+			if (this.bunnay.distanceToSqr(owner) <= GIFT_REACH * GIFT_REACH) {
+				ItemStack gift = this.bunnay.food.removeItem(0, this.bunnay.carrotsToGive());
+				BehaviorUtils.throwItem(this.bunnay, gift, owner.position());
+				this.bunnay.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.3F);
+				this.bunnay.giftCooldown = GIFT_COOLDOWN_TICKS;
+				this.bunnay.getNavigation().stop();
+				this.gave = true;
+			} else if (this.ticks % 10 == 1) {
+				this.bunnay.getNavigation().moveTo(owner, 1.2);
 			}
 		}
 
 		@Override
 		public void stop() {
-			this.boat = null;
+			if (!this.gave && this.ticks >= GIFT_GIVE_UP_TICKS) {
+				this.bunnay.giftCooldown = GIFT_RETRY_TICKS;
+			}
 			this.bunnay.getNavigation().stop();
 		}
 	}
