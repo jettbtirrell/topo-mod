@@ -1,5 +1,7 @@
 package dev.jett.topomod.companion.entity;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
@@ -32,6 +34,10 @@ import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.AnimationState;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -157,6 +163,26 @@ public class BunnayEntity extends TamableAnimal {
 	/** Fast enough to cover the longest leap: (11 - 1) / 5.45 is about 1.83. */
 	private static final double LEAP_MAX_SPEED = 1.85;
 
+	// Retreating to heal. A tamed bunnay in a fight that is hurt down to RETREAT_BELOW_FRACTION of its health, and has a
+	// carrot to eat, breaks off: it springs well away from the enemies (the big hop, aimed at open ground away from them),
+	// drops the fight, and stands still eating until it is about healed, without being drawn back in. Then it goes back to
+	// the nearest enemy that is after its owner.
+	private static final float RETREAT_BELOW_FRACTION = 0.35F;
+	/** It only breaks off a fight it is really in: it has a target, or was hurt by a mob this recently (in ticks). */
+	private static final int RETREAT_FIGHT_TICKS = 100;
+	/** How far the escape jump aims to land, in blocks (the forward speed is this over LEAP_BLOCKS_PER_SPEED). */
+	private static final double RETREAT_JUMP_DISTANCE = 9.0;
+	/** An enemy that is after it, or this close (in blocks), while it recovers makes it spring away again... */
+	private static final double RETREAT_THREAT_DISTANCE = 5.0;
+	/** ...up to this many jumps in one retreat. */
+	private static final int RETREAT_MAX_JUMPS = 3;
+	/** The most ticks a retreat can last (30 seconds), so it can never get stuck in one. */
+	private static final int RETREAT_MAX_TICKS = 600;
+	/** How far it looks for enemies to flee from, and to turn back on at the end, in blocks. */
+	private static final double RETREAT_SEARCH_RADIUS = 14.0;
+	/** The wait after a retreat before it can start another, in ticks. */
+	private static final int RETREAT_COOLDOWN = 60;
+
 	// Eating the carrots in its off hand to heal.
 	/** How long one carrot takes to eat, in ticks (the same as a player's). */
 	private static final int EAT_TICKS = 32;
@@ -200,6 +226,12 @@ public class BunnayEntity extends TamableAnimal {
 	 * swapping the carrot into its left hand for the meal, like a player switching to food and back.
 	 */
 	private final SimpleContainer food = new SimpleContainer(1);
+
+	// Retreating to heal (server side only).
+	private boolean retreating;
+	private int retreatTicks;
+	private int retreatJumps;
+	private int retreatCooldown;
 	/** The hand it attacked with last. With a weapon in each hand it swings them in turn. */
 	private InteractionHand attackHand = InteractionHand.MAIN_HAND;
 
@@ -287,13 +319,99 @@ public class BunnayEntity extends TamableAnimal {
 		LivingEntity target = this.getTarget();
 		return (target == null || !target.isAlive())
 			&& this.hurtTime == 0
-			&& this.tickCount - this.getLastHurtByMobTimestamp() > EAT_SAFE_TICKS
+			&& (this.retreating || this.tickCount - this.getLastHurtByMobTimestamp() > EAT_SAFE_TICKS)
 			&& this.getMaxHealth() - this.getHealth() >= (alreadyEating ? EAT_KEEP_GOING_MISSING_HEALTH : EAT_MIN_MISSING_HEALTH)
 			&& this.onGround()
 			&& !this.isInWater()
 			&& !this.isBigHopping()
 			&& !this.isDancing()
 			&& !this.isPassenger();
+	}
+
+	/** Hurt enough to want to get out, with a carrot to eat once it has, and in a fight right now. */
+	private boolean wantsToRetreat() {
+		LivingEntity target = this.getTarget();
+		boolean inFight = (target != null && target.isAlive()) || this.tickCount - this.getLastHurtByMobTimestamp() <= RETREAT_FIGHT_TICKS;
+		return this.isTame() && !this.isBaby() && !this.isOrderedToSit() && !this.isDancing()
+			&& this.getHealth() <= this.getMaxHealth() * RETREAT_BELOW_FRACTION
+			&& isCarrot(this.food.getItem(0))
+			&& inFight;
+	}
+
+	/** Starts a retreat when it is time to, and ends it when it has healed, run out of carrots, or taken too long. */
+	private void tickRetreat() {
+		if (this.retreatCooldown > 0) {
+			this.retreatCooldown--;
+		}
+		if (!this.retreating) {
+			if (this.retreatCooldown <= 0 && this.wantsToRetreat()) {
+				this.startRetreat();
+			}
+			return;
+		}
+
+		this.retreatTicks++;
+		boolean healed = this.getMaxHealth() - this.getHealth() < EAT_KEEP_GOING_MISSING_HEALTH;
+		boolean outOfFood = !isCarrot(this.food.getItem(0)) && !this.isEating();
+		if (healed || outOfFood || this.retreatTicks > RETREAT_MAX_TICKS || this.isOrderedToSit() || !this.isAlive()) {
+			this.endRetreat(healed);
+		}
+	}
+
+	private void startRetreat() {
+		this.retreating = true;
+		this.retreatTicks = 0;
+		this.retreatJumps = 0;
+		this.eatCooldown = 0;
+		this.dropAggro();
+	}
+
+	/** Back to normal. If it healed, it turns on an enemy that is after its owner (or near them) to rejoin the fight. */
+	private void endRetreat(boolean healed) {
+		this.retreating = false;
+		this.retreatCooldown = RETREAT_COOLDOWN;
+		if (healed && this.level() instanceof ServerLevel level) {
+			LivingEntity owner = this.getOwner();
+			Vec3 center = owner != null ? owner.position() : this.position();
+			List<Mob> foes = level.getEntitiesOfClass(
+				Mob.class,
+				new AABB(center, center).inflate(RETREAT_SEARCH_RADIUS),
+				mob -> mob != this && mob instanceof Enemy && mob.isAlive()
+					&& (owner == null || (this.wantsToAttack(mob, owner) && (mob.getTarget() == owner || mob.distanceToSqr(owner) < 64.0)))
+			);
+			foes.sort(Comparator.comparingDouble(mob -> mob.distanceToSqr(center)));
+			if (!foes.isEmpty()) {
+				this.setTarget(foes.get(0));
+			}
+		}
+	}
+
+	/** The enemies that are fighting it or are close to it, for working out which way is away. */
+	private List<Mob> nearbyThreats() {
+		return this.level().getEntitiesOfClass(
+			Mob.class,
+			this.getBoundingBox().inflate(RETREAT_SEARCH_RADIUS),
+			mob -> mob != this && mob instanceof Enemy && mob.isAlive() && (mob.getTarget() == this || mob.distanceToSqr(this) < 64.0)
+		);
+	}
+
+	/** It forgets who it was fighting, and everything that was after it forgets it. */
+	private void dropAggro() {
+		this.setTarget(null);
+		this.setLastHurtByMob(null);
+		for (Mob mob : this.level().getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(RETREAT_SEARCH_RADIUS), m -> m != this && m.getTarget() == this)) {
+			mob.setTarget(null);
+			mob.getNavigation().stop();
+		}
+	}
+
+	// While it retreats it takes no new target: neither its owner's fight nor a mob that hurt it pulls it back in.
+	@Override
+	public void setTarget(@Nullable LivingEntity target) {
+		if (this.retreating && target != null) {
+			return;
+		}
+		super.setTarget(target);
 	}
 
 	/** Starts, plays and finishes eating the carrot in its off hand. The server decides; the client just shows the pose. */
@@ -530,6 +648,7 @@ public class BunnayEntity extends TamableAnimal {
 	public void aiStep() {
 		super.aiStep();
 		if (!this.level().isClientSide()) {
+			this.tickRetreat();
 			this.tickEating();
 		}
 		if (!this.level().isClientSide() && this.isDancing() && this.shouldStopDancing() && this.tickCount % 20 == 0) {
@@ -599,6 +718,7 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	protected void registerGoals() {
+		this.goalSelector.addGoal(0, new RetreatGoal(this));
 		this.goalSelector.addGoal(1, new FloatGoal(this));
 		this.goalSelector.addGoal(1, new SitWhenOrderedToGoal(this));
 		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
@@ -1059,6 +1179,181 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		protected boolean isTimeToAttack() {
 			return this.getTicksUntilNextAttack() <= ATTACK_HEAD_START_TICKS;
+		}
+	}
+
+	/**
+	 * Breaks off a fight to heal. First it springs away from the enemies (the big hop, aimed at open ground away from
+	 * them); then it holds still, which is when tickEating gets to eat its carrots. If an enemy that is after it gets
+	 * close while it recovers, it springs away again, a few times at most.
+	 */
+	private static final class RetreatGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private boolean jumping;
+		private int jumpTicks;
+		private Vec3 jumpDirection = Vec3.ZERO;
+
+		RetreatGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
+		}
+
+		@Override
+		public boolean canUse() {
+			return this.bunnay.retreating;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.bunnay.retreating;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void start() {
+			this.jumping = false;
+			this.bunnay.getNavigation().stop();
+		}
+
+		@Override
+		public void tick() {
+			if (this.jumping) {
+				this.tickJump();
+				return;
+			}
+			// Holding still, so that it can eat.
+			this.bunnay.getNavigation().stop();
+			if (this.bunnay.retreatJumps >= RETREAT_MAX_JUMPS || !this.canJump()) {
+				return;
+			}
+			if (this.bunnay.retreatJumps == 0 || (this.bunnay.tickCount % 5 == 0 && this.threatenedNow())) {
+				this.startJump();
+			}
+		}
+
+		private boolean canJump() {
+			return this.bunnay.onGround() && !this.bunnay.isInWater() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
+				&& !this.bunnay.isInSittingPose() && !this.bunnay.isDancing();
+		}
+
+		/** An enemy is after it, or close enough that it cannot eat in peace. */
+		private boolean threatenedNow() {
+			for (Mob mob : this.bunnay.nearbyThreats()) {
+				if (mob.getTarget() == this.bunnay || mob.distanceToSqr(this.bunnay) < RETREAT_THREAT_DISTANCE * RETREAT_THREAT_DISTANCE) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		private void startJump() {
+			this.jumping = true;
+			this.jumpTicks = 0;
+			this.bunnay.retreatJumps++;
+			if (this.bunnay.isEating()) {
+				this.bunnay.stopEating();
+			}
+			this.jumpDirection = this.chooseDirection();
+			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_BIG_HOPPING, true);
+			this.bunnay.bigHopAnimationTicks = BIG_HOP_TICKS;
+		}
+
+		private void tickJump() {
+			this.jumpTicks++;
+			// Crouching, turn to face the way it will go.
+			if (this.jumpTicks <= BIG_HOP_TAKEOFF_TICK) {
+				float yaw = (float) Math.toDegrees(Math.atan2(this.jumpDirection.z, this.jumpDirection.x)) - 90.0F;
+				this.bunnay.setYRot(yaw);
+				this.bunnay.yBodyRot = yaw;
+				this.bunnay.setYHeadRot(yaw);
+			}
+			if (this.jumpTicks == BIG_HOP_TAKEOFF_TICK) {
+				double speed = Math.min(RETREAT_JUMP_DISTANCE / LEAP_BLOCKS_PER_SPEED, LEAP_MAX_SPEED);
+				this.bunnay.setDeltaMovement(new Vec3(this.jumpDirection.x * speed, BIG_HOP_LAUNCH_SPEED, this.jumpDirection.z * speed));
+				this.bunnay.needsSync = true;
+				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
+				// A puff of smoke where it leaves, and everything that was after it loses it.
+				if (this.bunnay.level() instanceof ServerLevel level) {
+					level.sendParticles(ParticleTypes.POOF, this.bunnay.getX(), this.bunnay.getY() + 0.3, this.bunnay.getZ(), 12, 0.3, 0.1, 0.3, 0.05);
+				}
+				this.bunnay.dropAggro();
+			}
+			boolean landed = this.jumpTicks > BIG_HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround();
+			if (landed || this.jumpTicks >= BIG_HOP_TICKS) {
+				this.jumping = false;
+			}
+		}
+
+		/**
+		 * Which way to jump: away from the enemies, but swung to either side if the way straight away has no safe place to land,
+		 * and among the safe ways the one that ends nearest its owner.
+		 */
+		private Vec3 chooseDirection() {
+			Vec3 here = this.bunnay.position();
+			Vec3 threatCenter = Vec3.ZERO;
+			List<Mob> threats = this.bunnay.nearbyThreats();
+			for (Mob mob : threats) {
+				threatCenter = threatCenter.add(mob.position());
+			}
+			Vec3 away;
+			if (threats.isEmpty()) {
+				double yaw = Math.toRadians(this.bunnay.getYRot());
+				away = new Vec3(Math.sin(yaw), 0.0, -Math.cos(yaw));
+			} else {
+				away = here.subtract(threatCenter.scale(1.0 / threats.size())).multiply(1.0, 0.0, 1.0);
+				away = away.lengthSqr() < 1.0E-4 ? new Vec3(1.0, 0.0, 0.0) : away.normalize();
+			}
+
+			LivingEntity owner = this.bunnay.getOwner();
+			Vec3 best = null;
+			double bestScore = Double.MAX_VALUE;
+			for (double degrees : new double[]{0, 30, -30, 60, -60, 90, -90, 130, -130}) {
+				double radians = Math.toRadians(degrees);
+				Vec3 dir = new Vec3(away.x * Math.cos(radians) - away.z * Math.sin(radians), 0.0, away.x * Math.sin(radians) + away.z * Math.cos(radians));
+				Vec3 landing = here.add(dir.scale(RETREAT_JUMP_DISTANCE));
+				if (!this.pathClear(here, dir) || !this.safeLanding(landing)) {
+					continue;
+				}
+				double score = owner != null ? landing.distanceToSqr(owner.position()) : Math.abs(degrees);
+				if (score < bestScore) {
+					bestScore = score;
+					best = dir;
+				}
+			}
+			return best != null ? best : away;
+		}
+
+		/** Nothing solid in the way at body height along the first stretch of the jump. */
+		private boolean pathClear(Vec3 from, Vec3 dir) {
+			for (double along = 1.5; along <= RETREAT_JUMP_DISTANCE; along += 1.5) {
+				BlockPos pos = BlockPos.containing(from.x + dir.x * along, from.y + 1.0, from.z + dir.z * along);
+				if (!this.bunnay.level().getBlockState(pos).getCollisionShape(this.bunnay.level(), pos).isEmpty()) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/** Solid ground to stand on within a few blocks up or down of here, with room above it, and no water or lava. */
+		private boolean safeLanding(Vec3 point) {
+			Level level = this.bunnay.level();
+			for (int dy = 2; dy >= -4; dy--) {
+				BlockPos feet = BlockPos.containing(point.x, this.bunnay.getY() + dy, point.z);
+				BlockPos floor = feet.below();
+				BlockState floorState = level.getBlockState(floor);
+				if (!floorState.getCollisionShape(level, floor).isEmpty() && floorState.getFluidState().isEmpty()
+					&& level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+					&& level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()
+					&& level.getFluidState(feet).isEmpty() && !floorState.is(Blocks.MAGMA_BLOCK)) {
+					return true;
+				}
+			}
+			return false;
 		}
 	}
 }
