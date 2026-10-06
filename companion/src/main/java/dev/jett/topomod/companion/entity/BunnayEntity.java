@@ -93,8 +93,8 @@ import org.jspecify.annotations.Nullable;
 // Bunnay: a bunny-allay cross that can be tamed with carrots. It follows its owner and fights like a wolf; holding
 // weapons, sitting and an item screen will be built on this the way they were for the topo.
 public class BunnayEntity extends TamableAnimal {
-	private static final double WILD_HEALTH = 10.0;
-	private static final double TAME_HEALTH = 60.0;
+	private static final double WILD_HEALTH = 16.0;
+	private static final double TAME_HEALTH = 80.0;
 
 	// The big hop: a crouch, a launch, a couple of blocks of height, and a squashy landing. The keyframe clip is
 	// BunnayAnimation.BIG_HOP; these numbers have to stay in step with it (see the comment there).
@@ -925,9 +925,9 @@ public class BunnayEntity extends TamableAnimal {
 		return stack.is(Items.CARROT) || stack.is(Items.GOLDEN_CARROT);
 	}
 
-	/** Health a carrot or golden carrot restores: a carrot 4 (2 hearts), a golden carrot 30 (15 hearts). */
+	/** Health a carrot or golden carrot restores: a carrot 6 (3 hearts), a golden carrot 30 (15 hearts). */
 	private static float healAmount(ItemStack food) {
-		return food.is(Items.GOLDEN_CARROT) ? 30.0F : 4.0F;
+		return food.is(Items.GOLDEN_CARROT) ? 30.0F : 6.0F;
 	}
 
 	// It can't breed with its own kind (see getBreedOffspring), so feeding it never puts it in love mode.
