@@ -40,6 +40,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -216,8 +217,12 @@ public class BunnayEntity extends TamableAnimal {
 	private static final double HARVEST_OWNER_RANGE = 16.0;
 	/** It breaks the carrots this long after it gets there (it swings at them first), in ticks. */
 	private static final int HARVEST_WORK_TICKS = 8;
-	/** It gives up on a carrot it cannot reach after this long, in ticks. */
-	private static final int HARVEST_GIVE_UP_TICKS = 200;
+	/** The whole job (walk over, break, pick up, wait, plant) is abandoned after this long, in ticks (20 seconds). */
+	private static final int HARVEST_GIVE_UP_TICKS = 400;
+	/** It stops trying to reach the dropped carrots after this long (5 seconds), and goes on to planting. */
+	private static final int HARVEST_PICK_UP_TICKS = 100;
+	/** After picking up (or giving up on) the drops it waits this long (1 second) before planting. */
+	private static final int HARVEST_REPLANT_DELAY_TICKS = 20;
 
 	// Eating the carrots in its off hand to heal.
 	/** How long one carrot takes to eat, in ticks (the same as a player's). */
@@ -349,13 +354,16 @@ public class BunnayEntity extends TamableAnimal {
 
 	/**
 	 * Out of the fight, hurt enough to want a carrot, and standing around: not fighting, dancing, hopping or in water.
-	 * Once it is already eating, how hurt it has to be is lower (see EAT_KEEP_GOING_MISSING_HEALTH), so it finishes the job.
+	 * Once it is already eating, how hurt it has to be is lower (see EAT_KEEP_GOING_MISSING_HEALTH), so it finishes the job,
+	 * and being hurt no longer matters (only a new target, which means a fight has found it, stops it).
 	 */
 	private boolean canEat(boolean alreadyEating) {
 		LivingEntity target = this.getTarget();
+		// Starting needs it to be out of the fight, but once it is eating, damage does not stop it: a bunnay hit by something
+		// that keeps hurting it (a wither effect, poison, fire) would otherwise never get to finish a carrot.
 		return (target == null || !target.isAlive())
-			&& this.hurtTime == 0
-			&& (this.retreating || this.tickCount - this.getLastHurtByMobTimestamp() > EAT_SAFE_TICKS)
+			&& (alreadyEating || this.hurtTime == 0)
+			&& (alreadyEating || this.retreating || this.tickCount - this.getLastHurtByMobTimestamp() > EAT_SAFE_TICKS)
 			&& this.getMaxHealth() - this.getHealth() >= (alreadyEating ? EAT_KEEP_GOING_MISSING_HEALTH : EAT_MIN_MISSING_HEALTH)
 			&& this.onGround()
 			&& !this.isInWater()
@@ -1523,14 +1531,31 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/**
-	 * Goes to a fully grown carrot it can reach, swings at it, breaks it, puts the drops in its food slot (whatever does
-	 * not fit is dropped as usual), and plants a new carrot where it was. One carrot per run; it looks for the next a
-	 * moment later.
+	 * Harvests one fully grown carrot at a time, the way a person would: it walks to the carrot, swings at it and breaks it, so
+	 * the carrots really drop; then it walks to the dropped carrots and picks them up into its food slot; waits a moment; and
+	 * plants a new carrot in the spot. It is built so that nothing can leave it stuck: every part has a time limit, drops that
+	 * are picked up by someone else (or despawn) are simply skipped, and if the job is interrupted after the carrot was broken
+	 * (a fight, a retreat), the new carrot is planted right then so there is never a hole in the field. When it is done with one
+	 * carrot it goes straight on to the next ripe one, so a row is worked through without pause.
 	 */
 	private static final class HarvestCarrotsGoal extends Goal {
+		private enum Phase {
+			/** Heading for the ripe carrot, then swinging at it. */
+			GO_TO_CROP,
+			/** The carrot is broken; collecting what it dropped. */
+			PICK_UP,
+			/** Waiting a moment next to the spot before planting. */
+			WAIT
+		}
+
 		private final BunnayEntity bunnay;
 		private BlockPos crop;
+		private Phase phase = Phase.GO_TO_CROP;
+		/** Whether the carrot at crop has been broken, so a new one is owed. */
+		private boolean broken;
+		private final List<ItemEntity> drops = new java.util.ArrayList<>();
 		private int workTicks;
+		private int phaseTicks;
 		private int giveUpTicks;
 		/** Ticks until it next scans for carrots, so the search is not done every tick. */
 		private int scanDelay;
@@ -1540,16 +1565,17 @@ public class BunnayEntity extends TamableAnimal {
 			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
 		}
 
-		/** Able to harvest right now: tame, calm, not mid-something, with room for carrots, and mobs may grief. */
-		private boolean canHarvest() {
-			if (!(this.bunnay.level() instanceof ServerLevel level)) {
-				return false;
-			}
+		/** Calm and free to work: tame, not busy with anything else, and not in a fight. */
+		private boolean freeToWork() {
 			LivingEntity target = this.bunnay.getTarget();
 			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
 				&& !this.bunnay.retreating && !this.bunnay.isEating() && !this.bunnay.isBigHopping() && !this.bunnay.isPassenger()
-				&& (target == null || !target.isAlive())
-				&& this.bunnay.canTakeCarrots()
+				&& (target == null || !target.isAlive());
+		}
+
+		/** Able to start on a new carrot: free to work, with room for carrots, and mobs may grief. */
+		private boolean canStart() {
+			return this.bunnay.level() instanceof ServerLevel level && this.freeToWork() && this.bunnay.canTakeCarrots()
 				&& level.getGameRules().get(GameRules.MOB_GRIEFING);
 		}
 
@@ -1565,7 +1591,7 @@ public class BunnayEntity extends TamableAnimal {
 				return false;
 			}
 			this.scanDelay = 20 + this.bunnay.getRandom().nextInt(20);
-			if (!this.canHarvest()) {
+			if (!this.canStart()) {
 				return false;
 			}
 			this.crop = this.findCrop();
@@ -1596,19 +1622,34 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public boolean canContinueToUse() {
-			return this.crop != null && this.giveUpTicks < HARVEST_GIVE_UP_TICKS && this.canHarvest() && this.isRipeCarrot(this.crop);
+			if (this.crop == null || this.giveUpTicks >= HARVEST_GIVE_UP_TICKS || !this.freeToWork()) {
+				return false;
+			}
+			// Until it is broken, the carrot has to still be there and ripe (someone else may have taken it).
+			return this.phase != Phase.GO_TO_CROP || (this.bunnay.canTakeCarrots() && this.isRipeCarrot(this.crop));
 		}
 
 		@Override
 		public void start() {
+			this.phase = Phase.GO_TO_CROP;
+			this.broken = false;
+			this.drops.clear();
 			this.workTicks = 0;
+			this.phaseTicks = 0;
 			this.giveUpTicks = 0;
 			this.bunnay.getNavigation().moveTo(this.crop.getX() + 0.5, this.crop.getY(), this.crop.getZ() + 0.5, 1.2);
 		}
 
 		@Override
 		public void stop() {
+			// However the job ended (finished, interrupted, timed out), a carrot that was broken is replaced now, so it
+			// never leaves a hole in the field.
+			if (this.broken && this.crop != null && this.bunnay.level() instanceof ServerLevel level) {
+				this.plant(level);
+			}
 			this.crop = null;
+			this.broken = false;
+			this.drops.clear();
 			this.bunnay.getNavigation().stop();
 		}
 
@@ -1619,12 +1660,19 @@ public class BunnayEntity extends TamableAnimal {
 
 		@Override
 		public void tick() {
-			// The goal can be ticked once more after harvest() has finished with the carrot (it is checked for ending only
-			// every other tick), so there may be nothing left to work on.
-			if (this.crop == null) {
+			// The goal can be ticked once more after the job is done (it is checked for ending only every other tick).
+			if (this.crop == null || !(this.bunnay.level() instanceof ServerLevel level)) {
 				return;
 			}
 			this.giveUpTicks++;
+			switch (this.phase) {
+				case GO_TO_CROP -> this.tickGoToCrop(level);
+				case PICK_UP -> this.tickPickUp();
+				case WAIT -> this.tickWait(level);
+			}
+		}
+
+		private void tickGoToCrop(ServerLevel level) {
 			Vec3 center = Vec3.atCenterOf(this.crop);
 			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
 			if (this.bunnay.distanceToSqr(center) > 1.9 * 1.9) {
@@ -1635,38 +1683,116 @@ public class BunnayEntity extends TamableAnimal {
 				}
 				return;
 			}
-
 			this.bunnay.getNavigation().stop();
 			this.workTicks++;
 			if (this.workTicks == 1) {
 				this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
 			}
-			if (this.workTicks >= HARVEST_WORK_TICKS && this.bunnay.level() instanceof ServerLevel level) {
-				this.harvest(level);
+			if (this.workTicks >= HARVEST_WORK_TICKS) {
+				this.breakCrop(level);
 			}
 		}
 
-		/** Breaks the carrot and picks up what it drops, straight into the food slot. */
-		private void harvest(ServerLevel level) {
-			BlockState state = level.getBlockState(this.crop);
-			List<ItemStack> drops = Block.getDrops(state, level, this.crop, null, this.bunnay, ItemStack.EMPTY);
-			level.destroyBlock(this.crop, false, this.bunnay);
-			for (ItemStack drop : drops) {
-				ItemStack leftover = this.bunnay.food.addItem(drop);
-				if (!leftover.isEmpty()) {
-					Block.popResource(level, this.crop, leftover);
+		/** Breaks the carrot so that it drops its carrots, and notes the dropped items to go and collect. */
+		private void breakCrop(ServerLevel level) {
+			if (!this.isRipeCarrot(this.crop)) {
+				return;
+			}
+			level.destroyBlock(this.crop, true, this.bunnay);
+			this.broken = true;
+			// The items it just dropped: carrots that appeared a moment ago next to where the carrot was.
+			this.drops.clear();
+			this.drops.addAll(level.getEntitiesOfClass(ItemEntity.class, new net.minecraft.world.phys.AABB(this.crop).inflate(1.5), item -> item.getAge() < 20));
+			this.phase = Phase.PICK_UP;
+			this.phaseTicks = 0;
+		}
+
+		private void tickPickUp() {
+			this.phaseTicks++;
+			// Drops that someone else picked up, or that are gone, are simply skipped.
+			this.drops.removeIf(item -> item.isRemoved() || item.getItem().isEmpty());
+			if (this.drops.isEmpty() || !this.bunnay.canTakeCarrots() || this.phaseTicks > HARVEST_PICK_UP_TICKS) {
+				this.startWaiting();
+				return;
+			}
+
+			ItemEntity next = this.drops.stream().min(Comparator.comparingDouble(item -> this.bunnay.distanceToSqr(item))).get();
+			this.bunnay.getLookControl().setLookAt(next);
+			if (this.bunnay.distanceToSqr(next) > 1.3 * 1.3) {
+				if (this.bunnay.getNavigation().isDone()) {
+					this.bunnay.getNavigation().moveTo(next, 1.2);
 				}
+				return;
+			}
+
+			// Close enough: pick it up into the food slot (what does not fit stays on the ground).
+			ItemStack stack = next.getItem();
+			ItemStack leftover = this.bunnay.food.addItem(stack.copy());
+			if (leftover.isEmpty()) {
+				next.discard();
+			} else {
+				next.setItem(leftover);
 			}
 			this.bunnay.food.setChanged();
-			level.playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
+			this.bunnay.level().playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
+		}
 
-			// Plants a new carrot in the same spot, so the field keeps growing. It costs nothing, and only goes in where
-			// there is still farmland under it.
-			if (level.getBlockState(this.crop).isAir() && level.getBlockState(this.crop.below()).is(Blocks.FARMLAND)) {
-				level.setBlockAndUpdate(this.crop, Blocks.CARROTS.defaultBlockState());
-				level.playSound(null, this.crop, SoundEvents.CROP_PLANTED, SoundSource.NEUTRAL, 0.8F, 1.0F);
+		private void startWaiting() {
+			this.phase = Phase.WAIT;
+			this.phaseTicks = 0;
+			this.bunnay.getNavigation().stop();
+		}
+
+		/** A second beside the spot (walking back to it if it wandered off after the drops), then plants. */
+		private void tickWait(ServerLevel level) {
+			Vec3 center = Vec3.atCenterOf(this.crop);
+			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
+			if (this.bunnay.distanceToSqr(center) > 2.2 * 2.2) {
+				this.phaseTicks = 0;
+				if (this.bunnay.getNavigation().isDone()) {
+					this.bunnay.getNavigation().moveTo(center.x, this.crop.getY(), center.z, 1.2);
+				}
+				return;
 			}
-			this.crop = null;
+			this.bunnay.getNavigation().stop();
+			this.phaseTicks++;
+			if (this.phaseTicks >= HARVEST_REPLANT_DELAY_TICKS) {
+				this.plant(level);
+				this.startNextCarrot();
+			}
+		}
+
+		/**
+		 * Straight on to the next ripe carrot, if there is one, without letting go of the goal (so nothing else gets a turn in
+		 * between, and there is no wait for the next search). With none left it ends, and a search follows shortly.
+		 */
+		private void startNextCarrot() {
+			BlockPos next = this.canStart() ? this.findCrop() : null;
+			if (next == null) {
+				this.crop = null;
+				this.scanDelay = 20;
+				return;
+			}
+			this.crop = next;
+			this.phase = Phase.GO_TO_CROP;
+			this.broken = false;
+			this.drops.clear();
+			this.workTicks = 0;
+			this.phaseTicks = 0;
+			this.giveUpTicks = 0;
+			this.bunnay.getNavigation().moveTo(next.getX() + 0.5, next.getY(), next.getZ() + 0.5, 1.2);
+		}
+
+		/** Plants a new carrot in the spot, if it is still empty with farmland under it (and loaded). Free of cost. */
+		private void plant(ServerLevel level) {
+			BlockPos spot = this.crop;
+			this.broken = false;
+			if (spot == null || !level.isLoaded(spot) || !level.getBlockState(spot).isAir() || !level.getBlockState(spot.below()).is(Blocks.FARMLAND)) {
+				return;
+			}
+			level.setBlockAndUpdate(spot, Blocks.CARROTS.defaultBlockState());
+			level.playSound(null, spot, SoundEvents.CROP_PLANTED, SoundSource.NEUTRAL, 0.8F, 1.0F);
+			this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
 		}
 	}
 }
