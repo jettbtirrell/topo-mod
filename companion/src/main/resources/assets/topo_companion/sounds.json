@@ -1,0 +1,10 @@
+{
+	"music_disc.bunny": {
+		"sounds": [
+			{
+				"name": "topo_companion:music_disc/bunny",
+				"stream": true
+			}
+		]
+	}
+}

@@ -2,5 +2,7 @@
 	"entity.topo_companion.topo": "Topo",
 	"entity.topo_companion.bunnay": "Bunnay",
 	"item.topo_companion.topo_spawn_egg": "Topo Spawn Egg",
-	"item.topo_companion.bunnay_spawn_egg": "Bunnay Spawn Egg"
+	"item.topo_companion.bunnay_spawn_egg": "Bunnay Spawn Egg",
+	"item.topo_companion.music_disc_bunny": "Music Disc",
+	"jukebox_song.topo_companion.bunny": "Bunnayhop"
 }

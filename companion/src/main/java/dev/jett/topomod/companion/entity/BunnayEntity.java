@@ -1112,12 +1112,18 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
+	/** Bunnays never take fall damage, however far they drop. */
+	@Override
+	public boolean causeFallDamage(double fallDistance, float damageModifier, DamageSource source) {
+		return false;
+	}
+
 	@Override
 	public boolean removeWhenFarAway(double distSqr) {
 		return !this.isTame();
 	}
 
-	// Bunnays come from a bunny and an allay (see BunnayBreeding), not from breeding with each other.
+	// Bunnays come from an allay dancing to the bunny music disc (see BunnayBreeding), not from breeding with each other.
 	@Override
 	public @Nullable AgeableMob getBreedOffspring(ServerLevel level, AgeableMob partner) {
 		return null;

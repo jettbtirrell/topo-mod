@@ -10,6 +10,8 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.JukeboxSong;
+import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.SpawnEggItem;
 
 public final class ModItems {
@@ -29,10 +31,23 @@ public final class ModItems {
 		new SpawnEggItem(new Item.Properties().setId(BUNNAY_SPAWN_EGG_KEY).spawnEgg(ModEntities.BUNNAY))
 	);
 
+	/** The song the bunny disc plays: data/topo_companion/jukebox_song/bunny.json. */
+	public static final ResourceKey<JukeboxSong> BUNNY_SONG = ResourceKey.create(Registries.JUKEBOX_SONG, CompanionMod.id("bunny"));
+
+	public static final ResourceKey<Item> MUSIC_DISC_BUNNY_KEY = ResourceKey.create(Registries.ITEM, CompanionMod.id("music_disc_bunny"));
+
+	/** An allay dancing to this disc splits into a bunnay, not another allay (see BunnayBreeding). */
+	public static final Item MUSIC_DISC_BUNNY = Registry.register(
+		BuiltInRegistries.ITEM,
+		MUSIC_DISC_BUNNY_KEY,
+		new Item(new Item.Properties().setId(MUSIC_DISC_BUNNY_KEY).stacksTo(1).rarity(Rarity.RARE).jukeboxPlayable(BUNNY_SONG))
+	);
+
 	private ModItems() {
 	}
 
 	public static void register() {
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES).register(entries -> entries.accept(MUSIC_DISC_BUNNY));
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
 			entries.accept(TOPO_SPAWN_EGG);
 			entries.accept(BUNNAY_SPAWN_EGG);

@@ -5,6 +5,7 @@ import dev.jett.topomod.companion.entity.BunnayBreeding;
 import dev.jett.topomod.companion.registry.ModEntities;
 import dev.jett.topomod.companion.registry.ModItems;
 import dev.jett.topomod.companion.registry.ModMenus;
+import dev.jett.topomod.companion.registry.ModSounds;
 
 import net.fabricmc.api.ModInitializer;
 
@@ -22,6 +23,7 @@ public class CompanionMod implements ModInitializer {
 	public void onInitialize() {
 		ModEntities.register();
 		ModMenus.register();
+		ModSounds.register();
 		ModItems.register();
 		BunnayBreeding.register();
 		TopoDebugCommand.register(); // DEBUG: remove with the command
