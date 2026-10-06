@@ -8,6 +8,7 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -18,13 +19,18 @@ public class BunnayRenderer extends MobRenderer<BunnayEntity, BunnayRenderState,
 
 	public BunnayRenderer(EntityRendererProvider.Context context) {
 		super(context, new BunnayModel(context.bakeLayer(LAYER)), 0.3F);
-		this.addLayer(new BunnayEyesLayer(this));
 		this.addLayer(new ItemInHandLayer<>(this));
 	}
 
 	@Override
 	public Identifier getTextureLocation(BunnayRenderState state) {
 		return TEXTURE;
+	}
+
+	// Lit from within like an allay: its whole body (and what it holds) is drawn at full block light, so it glows in the dark.
+	@Override
+	protected int getBlockLightLevel(BunnayEntity entity, BlockPos pos) {
+		return 15;
 	}
 
 	@Override
