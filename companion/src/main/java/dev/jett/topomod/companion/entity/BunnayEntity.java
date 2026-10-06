@@ -67,6 +67,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -267,6 +268,18 @@ public class BunnayEntity extends TamableAnimal {
 	 * swapping the carrot into its left hand for the meal, like a player switching to food and back.
 	 */
 	private final SimpleContainer food = new SimpleContainer(1);
+
+	// Riding in its owner's boat. It gets in when its owner is in a boat with room and it is close enough to reach it, and it
+	// gets out a moment after its owner does, so it is not left in the boat. (A boat with no player driving it picks up
+	// small mobs that bump into it, with no help from here, as with any mob.)
+	/** How far from the boat it will go to get in, in blocks, and how long it keeps trying (in ticks). */
+	private static final double BOAT_BOARD_RANGE = 12.0;
+	private static final int BOAT_BOARD_GIVE_UP_TICKS = 200;
+	/** It is close enough to climb in when it is within this many blocks of the boat. */
+	private static final double BOAT_REACH = 2.6;
+	/** It gets out of a boat its owner is no longer in after this many ticks, so a moment of the owner shifting seats is not enough. */
+	private static final int BOAT_ABANDONED_TICKS = 20;
+	private int boatAbandonedTicks;
 
 	// Retreating to heal (server side only).
 	private boolean retreating;
@@ -620,6 +633,21 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
+	/** Gets out of a boat once its owner is not in it any more (or has gone): see BOAT_ABANDONED_TICKS. */
+	private void tickBoatRide() {
+		if (!(this.getVehicle() instanceof AbstractBoat boat)) {
+			this.boatAbandonedTicks = 0;
+			return;
+		}
+		LivingEntity owner = this.getOwner();
+		if (owner != null && owner.getVehicle() == boat) {
+			this.boatAbandonedTicks = 0;
+		} else if (++this.boatAbandonedTicks >= BOAT_ABANDONED_TICKS) {
+			this.stopRiding();
+			this.boatAbandonedTicks = 0;
+		}
+	}
+
 	private void stopEating() {
 		this.entityData.set(DATA_EATING, false);
 		this.entityData.set(DATA_EATING_FOOD, ItemStack.EMPTY);
@@ -813,6 +841,7 @@ public class BunnayEntity extends TamableAnimal {
 		if (!this.level().isClientSide()) {
 			this.tickRetreat();
 			this.tickEating();
+			this.tickBoatRide();
 		}
 		if (!this.level().isClientSide() && this.isDancing() && this.shouldStopDancing() && this.tickCount % 20 == 0) {
 			this.jukeboxPos = null;
@@ -876,7 +905,11 @@ public class BunnayEntity extends TamableAnimal {
 			.add(Attributes.ATTACK_DAMAGE, 3.0)
 			// Its ordinary jump, the one it does by itself to get up a ledge: 0.5 is about 1.7 blocks high (the usual 0.42 is
 			// 1.25). The big hop and the leap set their own launch speed and are not affected.
-			.add(Attributes.JUMP_STRENGTH, 0.5);
+			.add(Attributes.JUMP_STRENGTH, 0.5)
+			// Swimming speed. A land mob moves at a crawl in water (about 1.6 blocks a second for this one); the water movement
+			// efficiency attribute (what Depth Strider sets, 0 to 1) closes that gap. 0.4 is about 2.8 times as fast, 4.5 blocks a
+			// second, roughly a walking pace; 0.2 is 2.1 times and 0.6 is 3.4 times.
+			.add(Attributes.WATER_MOVEMENT_EFFICIENCY, 0.4);
 	}
 
 	@Override
@@ -890,6 +923,7 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(1, new LeapGoal(this));
 		this.goalSelector.addGoal(2, new BigHopGoal(this));
 		this.goalSelector.addGoal(2, new BunnayMeleeGoal(this));
+		this.goalSelector.addGoal(3, new BoardBoatGoal(this));
 		this.goalSelector.addGoal(3, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(4, new HarvestCarrotsGoal(this));
 		this.goalSelector.addGoal(4, new FollowOwnerGoal(this, 1.1, 8.0F, 2.5F));
@@ -1793,6 +1827,80 @@ public class BunnayEntity extends TamableAnimal {
 			level.setBlockAndUpdate(spot, Blocks.CARROTS.defaultBlockState());
 			level.playSound(null, spot, SoundEvents.CROP_PLANTED, SoundSource.NEUTRAL, 0.8F, 1.0F);
 			this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
+		}
+	}
+
+	/**
+	 * Climbs into its owner's boat. It runs while its owner is riding a boat that has room, and it is within range and
+	 * not in a fight or sitting: it walks to the boat and, once it is within reach, gets in (the game seats it, as it
+	 * does anything that boards a boat). It gives up after a while, and tries again if the boat is still there.
+	 */
+	private static final class BoardBoatGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private AbstractBoat boat;
+		private int ticks;
+
+		BoardBoatGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		/** The boat its owner is riding, if it is one it could get into right now. */
+		private AbstractBoat boardableBoat() {
+			LivingEntity owner = this.bunnay.getOwner();
+			LivingEntity target = this.bunnay.getTarget();
+			if (!this.bunnay.isTame() || owner == null || this.bunnay.isPassenger() || this.bunnay.isBaby() || this.bunnay.isOrderedToSit()
+				|| this.bunnay.isDancing() || this.bunnay.retreating || this.bunnay.isEating() || this.bunnay.isBigHopping()
+				|| (target != null && target.isAlive())) {
+				return null;
+			}
+			if (!(owner.getVehicle() instanceof AbstractBoat found) || !found.hasEnoughSpaceFor(this.bunnay)) {
+				return null;
+			}
+			return this.bunnay.distanceToSqr(found) <= BOAT_BOARD_RANGE * BOAT_BOARD_RANGE ? found : null;
+		}
+
+		@Override
+		public boolean canUse() {
+			this.boat = this.boardableBoat();
+			return this.boat != null;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.ticks < BOAT_BOARD_GIVE_UP_TICKS && this.boardableBoat() == this.boat;
+		}
+
+		@Override
+		public void start() {
+			this.ticks = 0;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void tick() {
+			this.ticks++;
+			this.bunnay.getLookControl().setLookAt(this.boat, 30.0F, 30.0F);
+			if (this.bunnay.distanceToSqr(this.boat) <= BOAT_REACH * BOAT_REACH) {
+				// Close enough: in it gets. startRiding checks there is room, and says no if there is not.
+				if (this.bunnay.startRiding(this.boat)) {
+					this.bunnay.getNavigation().stop();
+				}
+				return;
+			}
+			if (this.ticks % 10 == 1) {
+				this.bunnay.getNavigation().moveTo(this.boat, 1.2);
+			}
+		}
+
+		@Override
+		public void stop() {
+			this.boat = null;
+			this.bunnay.getNavigation().stop();
 		}
 	}
 }
