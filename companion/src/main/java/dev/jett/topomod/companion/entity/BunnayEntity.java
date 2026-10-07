@@ -74,6 +74,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import dev.jett.topomod.companion.CompanionMod;
 import dev.jett.topomod.companion.menu.BunnayMenu;
+import net.minecraft.world.level.ClipBlockStateContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -85,6 +86,7 @@ import net.minecraft.world.level.gameevent.GameEventListener;
 import net.minecraft.world.level.gameevent.PositionSource;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
@@ -224,6 +226,26 @@ public class BunnayEntity extends TamableAnimal {
 	/** LivingEntity's wait between jumps is private, so it is reached by reflection (null if that fails, and nothing changes). */
 	private static final java.lang.reflect.Field NO_JUMP_DELAY_FIELD = noJumpDelayField();
 
+	// Farming at a note block, the way an allay attends to one. A note block played within FARM_HEARING_RADIUS makes a tamed
+	// bunnay "tune in" to it: for FARM_FORGET_TICKS (30 seconds) after the last note it works the carrots around it with its
+	// normal logic (looking for ripe ones, harvesting, replanting), is pulled back if it gets more than FARM_LEASH from the note
+	// block, and takes what it has harvested to the note block and tosses it there (so a hopper can catch it) whenever its food
+	// slot is full or there is nothing left to harvest. Another note from the same block starts the 30 seconds again; a different
+	// note block is ignored until it has forgotten the first. It does not follow its owner while it is tuned in. Wool between the
+	// note block and the bunnay muffles the note, as it does for an allay. Sitting makes it forget at once.
+	private static final int FARM_HEARING_RADIUS = 16;
+	private static final int FARM_FORGET_TICKS = 600;
+	/** It is pulled back when it is further than this from the note block (in blocks), until it is within FARM_CLOSE_ENOUGH. */
+	private static final double FARM_LEASH = 16.0;
+	private static final double FARM_CLOSE_ENOUGH = 4.0;
+	/** It tosses the carrots when it is this close to the note block. */
+	private static final double FARM_DELIVER_DISTANCE = 3.0;
+	/** It keeps this many carrots for itself when it delivers, so it can still heal. */
+	private static final int FARM_KEEP_CARROTS = 1;
+	/** The wait after a delivery before the next, and how long it tries to reach the note block, in ticks. */
+	private static final int FARM_DELIVER_COOLDOWN = 100;
+	private static final int FARM_DELIVER_GIVE_UP_TICKS = 400;
+
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
 	// straight into its food slot. It only does this where mobs are allowed to grief, and never strays far from its owner.
@@ -311,6 +333,13 @@ public class BunnayEntity extends TamableAnimal {
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
+	/** The note block it is tuned in to (see FARM_FORGET_TICKS), and the ticks left before it forgets it. */
+	private final DynamicGameEventListener<NoteBlockListener> dynamicNoteBlockListener;
+	private @Nullable BlockPos farmPos;
+	private int farmTicks;
+	/** Set by the harvest goal each time it looks: there was no ripe carrot for it to go to. Used to decide when to deliver. */
+	private boolean noCropsFound;
+	private int deliverCooldown;
 	private int hopCooldown;
 	/** Whether its follow-the-owner goal is running, which is when it hops towards its owner even if it cannot walk there. */
 	private boolean following;
@@ -321,6 +350,8 @@ public class BunnayEntity extends TamableAnimal {
 		super(type, level);
 		this.dynamicJukeboxListener = new DynamicGameEventListener<>(new JukeboxListener(
 			this, new EntityPositionSource(this, this.getEyeHeight()), GameEvent.JUKEBOX_PLAY.value().notificationRadius()));
+		this.dynamicNoteBlockListener = new DynamicGameEventListener<>(new NoteBlockListener(
+			this, new EntityPositionSource(this, this.getEyeHeight()), FARM_HEARING_RADIUS));
 	}
 
 	@Override
@@ -636,6 +667,7 @@ public class BunnayEntity extends TamableAnimal {
 		super.updateDynamicGameEventListener(listenerConsumer);
 		if (this.level() instanceof ServerLevel serverLevel) {
 			listenerConsumer.accept(this.dynamicJukeboxListener, serverLevel);
+			listenerConsumer.accept(this.dynamicNoteBlockListener, serverLevel);
 		}
 	}
 
@@ -673,12 +705,77 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.giftCooldown > 0) {
 				this.giftCooldown--;
 			}
+			if (this.deliverCooldown > 0) {
+				this.deliverCooldown--;
+			}
+			this.tickFarm();
 		}
 		if (!this.level().isClientSide() && this.isDancing() && this.shouldStopDancing() && this.tickCount % 20 == 0) {
 			this.jukeboxPos = null;
 			this.setDancing(false);
 		}
 
+	}
+
+	/** Whether it is tuned in to a note block, so it works the farm and does not follow its owner. */
+	public boolean isFarming() {
+		return this.farmPos != null;
+	}
+
+	/** Counts down the time to forget the note block, and forgets it if it has gone or the bunnay has been told to sit. */
+	private void tickFarm() {
+		if (this.farmPos == null) {
+			return;
+		}
+		if (--this.farmTicks <= 0 || this.isOrderedToSit()
+			|| (this.tickCount % 20 == 0 && !this.level().getBlockState(this.farmPos).is(Blocks.NOTE_BLOCK))) {
+			this.forgetFarm();
+		}
+	}
+
+	private void forgetFarm() {
+		this.farmPos = null;
+		this.farmTicks = 0;
+		this.noCropsFound = false;
+	}
+
+	// Being told to sit makes it forget the note block at once, so it is not kept waiting for the 30 seconds to be up.
+	@Override
+	public void setOrderedToSit(boolean orderedToSit) {
+		if (orderedToSit) {
+			this.forgetFarm();
+		}
+		super.setOrderedToSit(orderedToSit);
+	}
+
+	/**
+	 * A note block played at this spot, within hearing. It is ignored if the bunnay is not a tame adult, is sitting, or there is
+	 * wool between them. If it is not tuned in to anything it tunes in to this one; if this is the note block it is tuned in to,
+	 * the 30 seconds start again; any other is ignored.
+	 */
+	private void hearNoteBlock(ServerLevel level, BlockPos pos, Vec3 at) {
+		if (!this.isTame() || this.isBaby() || this.isOrderedToSit()) {
+			return;
+		}
+		boolean muffled = level.isBlockInLine(new ClipBlockStateContext(at, this.getEyePosition(), state -> state.is(BlockTags.OCCLUDES_VIBRATION_SIGNALS))).getType() != HitResult.Type.MISS;
+		if (muffled) {
+			return;
+		}
+		if (this.farmPos == null) {
+			this.farmPos = pos;
+			this.farmTicks = FARM_FORGET_TICKS;
+			// It has been given something to do: a chirp and a few notes over its head.
+			this.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.4F);
+			level.sendParticles(ParticleTypes.NOTE, this.getX(), this.getY() + this.getBbHeight() + 0.3, this.getZ(), 3, 0.3, 0.2, 0.3, 0.0);
+		} else if (this.farmPos.equals(pos)) {
+			this.farmTicks = FARM_FORGET_TICKS;
+		}
+	}
+
+	/** How many carrots it would deliver now: all the ordinary ones in its food slot but the FARM_KEEP_CARROTS it keeps. */
+	private int carrotsToDeliver() {
+		ItemStack held = this.food.getItem(0);
+		return held.is(Items.CARROT) ? Math.max(0, held.getCount() - FARM_KEEP_CARROTS) : 0;
 	}
 
 	private static java.lang.reflect.Field noJumpDelayField() {
@@ -1000,6 +1097,8 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(3, new BunnayMeleeGoal(this));
 		this.goalSelector.addGoal(4, new TemptGoal(this, 1.0, this::isFood, false));
 		this.goalSelector.addGoal(4, new GiveCarrotsGoal(this));
+		this.goalSelector.addGoal(4, new StayNearFarmGoal(this));
+		this.goalSelector.addGoal(4, new DeliverToNoteBlockGoal(this));
 		this.goalSelector.addGoal(5, new HarvestCarrotsGoal(this));
 		// Follows its owner like a wolf: starts from 10 blocks away and stops 2 blocks from them.
 		this.goalSelector.addGoal(5, new BunnayFollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
@@ -1352,6 +1451,17 @@ public class BunnayEntity extends TamableAnimal {
 			this.bunnay = bunnay;
 		}
 
+		// It does not follow its owner while it is tuned in to a note block.
+		@Override
+		public boolean canUse() {
+			return !this.bunnay.isFarming() && super.canUse();
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return !this.bunnay.isFarming() && super.canContinueToUse();
+		}
+
 		@Override
 		public void start() {
 			super.start();
@@ -1485,6 +1595,167 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void stop() {
 			this.run.stop();
+		}
+	}
+
+	/** Calm and free to go about farm business: tame, not sitting, dancing, eating, hopping, riding or fighting. */
+	private boolean freeForFarmWork() {
+		LivingEntity target = this.getTarget();
+		return this.isTame() && !this.isBaby() && !this.isOrderedToSit() && !this.isDancing() && !this.isEating() && !this.isHopping()
+			&& !this.isPassenger() && !this.fleeing && (target == null || !target.isAlive());
+	}
+
+	/**
+	 * Pulls it back to the note block it is tuned in to when it has got further than FARM_LEASH from it, like the allay's
+	 * "stay close to the target": it heads for the note block until it is within FARM_CLOSE_ENOUGH.
+	 */
+	private static final class StayNearFarmGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private int ticks;
+
+		StayNearFarmGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		@Override
+		public boolean canUse() {
+			BlockPos farm = this.bunnay.farmPos;
+			return farm != null && this.bunnay.freeForFarmWork() && this.bunnay.distanceToSqr(Vec3.atCenterOf(farm)) > FARM_LEASH * FARM_LEASH;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			BlockPos farm = this.bunnay.farmPos;
+			return farm != null && this.bunnay.freeForFarmWork() && this.ticks < FARM_DELIVER_GIVE_UP_TICKS
+				&& this.bunnay.distanceToSqr(Vec3.atCenterOf(farm)) > FARM_CLOSE_ENOUGH * FARM_CLOSE_ENOUGH;
+		}
+
+		@Override
+		public void start() {
+			this.ticks = 0;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void tick() {
+			BlockPos farm = this.bunnay.farmPos;
+			if (farm == null) {
+				return;
+			}
+			this.ticks++;
+			if (this.ticks % 10 == 1) {
+				this.bunnay.getNavigation().moveTo(farm.getX() + 0.5, farm.getY() + 1, farm.getZ() + 0.5, 1.2);
+			}
+		}
+
+		@Override
+		public void stop() {
+			this.bunnay.getNavigation().stop();
+		}
+	}
+
+	/**
+	 * Takes the harvest to the note block it is tuned in to and tosses it there, the way an allay hands over what it has
+	 * collected. It does that when its food slot is full or the harvest goal found nothing left to harvest, and it has more
+	 * carrots than the FARM_KEEP_CARROTS it keeps for itself.
+	 */
+	private static final class DeliverToNoteBlockGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private int ticks;
+		private boolean delivered;
+
+		DeliverToNoteBlockGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		private boolean shouldDeliver() {
+			return this.bunnay.farmPos != null && this.bunnay.freeForFarmWork() && this.bunnay.carrotsToDeliver() > 0
+				&& (!this.bunnay.canTakeCarrots() || this.bunnay.noCropsFound);
+		}
+
+		@Override
+		public boolean canUse() {
+			return this.bunnay.deliverCooldown <= 0 && this.shouldDeliver();
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return !this.delivered && this.ticks < FARM_DELIVER_GIVE_UP_TICKS && this.shouldDeliver();
+		}
+
+		@Override
+		public void start() {
+			this.ticks = 0;
+			this.delivered = false;
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void tick() {
+			BlockPos farm = this.bunnay.farmPos;
+			if (farm == null) {
+				return;
+			}
+			this.ticks++;
+			Vec3 target = Vec3.atCenterOf(farm);
+			this.bunnay.getLookControl().setLookAt(target.x, target.y, target.z);
+			if (this.bunnay.distanceToSqr(target) <= FARM_DELIVER_DISTANCE * FARM_DELIVER_DISTANCE) {
+				ItemStack load = this.bunnay.food.removeItem(0, this.bunnay.carrotsToDeliver());
+				BehaviorUtils.throwItem(this.bunnay, load, target);
+				this.bunnay.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.3F);
+				this.bunnay.deliverCooldown = FARM_DELIVER_COOLDOWN;
+				this.bunnay.getNavigation().stop();
+				this.delivered = true;
+			} else if (this.ticks % 10 == 1) {
+				this.bunnay.getNavigation().moveTo(target.x, farm.getY() + 1, target.z, 1.2);
+			}
+		}
+
+		@Override
+		public void stop() {
+			this.bunnay.getNavigation().stop();
+		}
+	}
+
+	/** Hears a note block played: the allay's listener for it (Allay.VibrationUser), pointed at this bunnay (see hearNoteBlock). */
+	private static final class NoteBlockListener implements GameEventListener {
+		private final BunnayEntity bunnay;
+		private final PositionSource listenerSource;
+		private final int listenerRadius;
+
+		NoteBlockListener(BunnayEntity bunnay, PositionSource listenerSource, int listenerRadius) {
+			this.bunnay = bunnay;
+			this.listenerSource = listenerSource;
+			this.listenerRadius = listenerRadius;
+		}
+
+		@Override
+		public PositionSource getListenerSource() {
+			return this.listenerSource;
+		}
+
+		@Override
+		public int getListenerRadius() {
+			return this.listenerRadius;
+		}
+
+		@Override
+		public boolean handleGameEvent(ServerLevel level, Holder<GameEvent> event, GameEvent.Context context, Vec3 pos) {
+			if (event.is(GameEvent.NOTE_BLOCK_PLAY)) {
+				this.bunnay.hearNoteBlock(level, BlockPos.containing(pos), pos);
+				return true;
+			}
+			return false;
 		}
 	}
 
@@ -1627,19 +1898,25 @@ public class BunnayEntity extends TamableAnimal {
 				return false;
 			}
 			this.crop = this.findCrop();
+			this.bunnay.noCropsFound = this.crop == null;
 			return this.crop != null;
 		}
 
 		/** The nearest ripe carrot (close enough to its owner) that it has a path to, or null. */
 		private BlockPos findCrop() {
 			LivingEntity owner = this.bunnay.getOwner();
+			BlockPos farm = this.bunnay.farmPos;
 			BlockPos origin = this.bunnay.blockPosition();
 			List<BlockPos> ripe = new java.util.ArrayList<>();
 			for (BlockPos pos : BlockPos.betweenClosed(
 				origin.offset(-HARVEST_SEARCH_RADIUS, -HARVEST_SEARCH_HEIGHT, -HARVEST_SEARCH_RADIUS),
 				origin.offset(HARVEST_SEARCH_RADIUS, HARVEST_SEARCH_HEIGHT, HARVEST_SEARCH_RADIUS)
 			)) {
-				if (this.isRipeCarrot(pos) && (owner == null || owner.distanceToSqr(Vec3.atCenterOf(pos)) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE)) {
+				// Close enough to the note block it is tuned in to, or to its owner when it is not.
+				boolean near = farm != null
+					? farm.distToCenterSqr(Vec3.atCenterOf(pos)) <= FARM_LEASH * FARM_LEASH
+					: owner == null || owner.distanceToSqr(Vec3.atCenterOf(pos)) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
+				if (this.isRipeCarrot(pos) && near) {
 					ripe.add(pos.immutable());
 				}
 			}
@@ -1799,7 +2076,9 @@ public class BunnayEntity extends TamableAnimal {
 		 * between, and there is no wait for the next search). With none left it ends, and a search follows shortly.
 		 */
 		private void startNextCarrot() {
-			BlockPos next = this.canStart() ? this.findCrop() : null;
+			boolean canStart = this.canStart();
+			BlockPos next = canStart ? this.findCrop() : null;
+			this.bunnay.noCropsFound = canStart && next == null;
 			if (next == null) {
 				this.crop = null;
 				this.scanDelay = 20;
