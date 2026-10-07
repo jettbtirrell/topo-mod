@@ -246,6 +246,13 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int FARM_DELIVER_COOLDOWN = 100;
 	private static final int FARM_DELIVER_GIVE_UP_TICKS = 400;
 
+	// Picking up carrots lying about. As something to do when it has nothing better, a tamed bunnay with room in its food slot
+	// goes to carrots on the ground nearby and picks them up, whoever dropped them (but not ones a bunnay tossed: its own gifts and
+	// deliveries). It stays within reach of its owner, or of the note block it is tuned in to.
+	private static final int PICK_UP_RADIUS = 8;
+	private static final int PICK_UP_HEIGHT = 3;
+	private static final int PICK_UP_GIVE_UP_TICKS = 200;
+
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
 	// straight into its food slot. It only does this where mobs are allowed to grief, and never strays far from its owner.
@@ -1102,9 +1109,11 @@ public class BunnayEntity extends TamableAnimal {
 		this.goalSelector.addGoal(5, new HarvestCarrotsGoal(this));
 		// Follows its owner like a wolf: starts from 10 blocks away and stops 2 blocks from them.
 		this.goalSelector.addGoal(5, new BunnayFollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
-		this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 0.8));
-		this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F));
-		this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+		// Picking up loose carrots is a low priority: below harvesting and following, above wandering about.
+		this.goalSelector.addGoal(6, new PickUpCarrotsGoal(this));
+		this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 0.8));
+		this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
+		this.goalSelector.addGoal(9, new RandomLookAroundGoal(this));
 
 		// Fights like a wolf: defends its owner, backs up the owner's attacks, and retaliates when hurt.
 		this.targetSelector.addGoal(1, new OwnerHurtByTargetGoal(this));
@@ -1756,6 +1765,111 @@ public class BunnayEntity extends TamableAnimal {
 				return true;
 			}
 			return false;
+		}
+	}
+
+	/**
+	 * Goes to carrots lying on the ground and picks them up into its food slot, when it has room and nothing better to do (see
+	 * PICK_UP_RADIUS). It looks every second or so, takes the nearest one it has a path to, and gives up on one it cannot reach.
+	 */
+	private static final class PickUpCarrotsGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private ItemEntity item;
+		private int ticks;
+		private int scanDelay;
+
+		PickUpCarrotsGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		private boolean ready() {
+			return this.bunnay.level() instanceof ServerLevel level && this.bunnay.freeForFarmWork() && this.bunnay.canTakeCarrots()
+				&& level.getGameRules().get(GameRules.MOB_GRIEFING);
+		}
+
+		private boolean wanted(ItemEntity candidate) {
+			ItemStack stack = candidate.getItem();
+			if (candidate.isRemoved() || candidate.hasPickUpDelay() || !isCarrot(stack) || !this.bunnay.food.canAddItem(stack)
+				|| candidate.getOwner() instanceof BunnayEntity) {
+				return false;
+			}
+			// Within reach of the note block it is tuned in to, or of its owner when it is not.
+			BlockPos farm = this.bunnay.farmPos;
+			LivingEntity owner = this.bunnay.getOwner();
+			if (farm != null) {
+				return farm.distToCenterSqr(candidate.position()) <= FARM_LEASH * FARM_LEASH;
+			}
+			return owner == null || owner.distanceToSqr(candidate) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
+		}
+
+		@Override
+		public boolean canUse() {
+			if (this.scanDelay > 0) {
+				this.scanDelay--;
+				return false;
+			}
+			this.scanDelay = 20 + this.bunnay.getRandom().nextInt(20);
+			if (!this.ready()) {
+				return false;
+			}
+			List<ItemEntity> found = this.bunnay.level().getEntitiesOfClass(ItemEntity.class,
+				this.bunnay.getBoundingBox().inflate(PICK_UP_RADIUS, PICK_UP_HEIGHT, PICK_UP_RADIUS), this::wanted);
+			found.sort(Comparator.comparingDouble(candidate -> this.bunnay.distanceToSqr(candidate)));
+			for (ItemEntity candidate : found.stream().limit(5).toList()) {
+				if (this.bunnay.getNavigation().createPath(candidate, 1) != null) {
+					this.item = candidate;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.item != null && this.ticks < PICK_UP_GIVE_UP_TICKS && this.ready() && this.wanted(this.item);
+		}
+
+		@Override
+		public void start() {
+			this.ticks = 0;
+			this.bunnay.getNavigation().moveTo(this.item, 1.2);
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void tick() {
+			if (this.item == null) {
+				return;
+			}
+			this.ticks++;
+			this.bunnay.getLookControl().setLookAt(this.item);
+			if (this.bunnay.distanceToSqr(this.item) > 1.3 * 1.3) {
+				if (this.bunnay.getNavigation().isDone()) {
+					this.bunnay.getNavigation().moveTo(this.item, 1.2);
+				}
+				return;
+			}
+			// Close enough: into the food slot (what does not fit stays on the ground).
+			ItemStack leftover = this.bunnay.food.addItem(this.item.getItem().copy());
+			if (leftover.isEmpty()) {
+				this.item.discard();
+			} else {
+				this.item.setItem(leftover);
+			}
+			this.bunnay.food.setChanged();
+			this.bunnay.level().playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
+			this.item = null;
+		}
+
+		@Override
+		public void stop() {
+			this.item = null;
+			this.bunnay.getNavigation().stop();
 		}
 	}
 
