@@ -1,0 +1,5 @@
+dependencies {
+	// Dev runs only: also load the damage numbers mod, so ./gradlew :allay-variants:runClient tests both together.
+	// (Not part of this mod's jar; players choose which jars to install.)
+	localRuntime project(':damage-numbers')
+}

@@ -3,7 +3,7 @@
 	"id": "topo_mod",
 	"version": "${version}",
 	"name": "Topo Mod",
-	"description": "All-in-one bundle of Topo Companion and Topo Damage Numbers.",
+	"description": "All-in-one bundle of Allay Variants and Damage Numbers (and Topo, when it is part of the build).",
 	"authors": [
 		"jettbtirrell"
 	],

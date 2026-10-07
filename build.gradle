@@ -2,7 +2,7 @@ plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}" apply false
 }
 
-// Shared setup for every module (companion, damage-numbers, bundle).
+// Shared setup for every module (allay-variants, topo, damage-numbers, bundle).
 // Each module sets its own `mod_id` in its gradle.properties.
 subprojects {
 	apply plugin: 'net.fabricmc.fabric-loom'

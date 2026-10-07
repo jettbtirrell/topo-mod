@@ -1,0 +1,10 @@
+{
+	"music_disc.bunny": {
+		"sounds": [
+			{
+				"name": "allay_variants:music_disc/bunny",
+				"stream": true
+			}
+		]
+	}
+}

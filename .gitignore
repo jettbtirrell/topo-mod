@@ -40,4 +40,5 @@ replay_*.log
 *.jfr
 
 # Models extracted from the Minecraft jar for reference only (Mojang assets, do not commit)
-companion/art/vanilla-reference/
+allay-variants/art/vanilla-reference/
+topo/art/vanilla-reference/

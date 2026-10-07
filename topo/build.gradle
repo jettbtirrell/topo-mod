@@ -1,0 +1,4 @@
+dependencies {
+	// Dev runs only: also load the damage numbers mod, so ./gradlew :topo:runClient tests both together.
+	localRuntime project(':damage-numbers')
+}

@@ -1,8 +1,0 @@
-{
-	"comparator_output": 5,
-	"description": {
-		"translate": "jukebox_song.topo_companion.bunny"
-	},
-	"length_in_seconds": 30.0,
-	"sound_event": "topo_companion:music_disc.bunny"
-}

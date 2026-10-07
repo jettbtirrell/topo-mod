@@ -1,0 +1,8 @@
+{
+	"comparator_output": 5,
+	"description": {
+		"translate": "jukebox_song.allay_variants.bunny"
+	},
+	"length_in_seconds": 30.0,
+	"sound_event": "allay_variants:music_disc.bunny"
+}

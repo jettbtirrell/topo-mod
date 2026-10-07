@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "allay_variants",
+	"version": "${version}",
+	"name": "Allay Variants",
+	"description": "Allay crossbreeds, starting with the bunnay: a rabbit-allay companion that fights, farms and hops.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/allay_variants/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.jett.topomod.allayvariants.AllayVariantsMod"
+		],
+		"client": [
+			"dev.jett.topomod.allayvariants.client.AllayVariantsModClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

@@ -1,5 +1,9 @@
 // Bundle: no code of its own. Embeds the other mods as jar-in-jar so one file installs everything.
 dependencies {
-	include project(':companion')
+	include project(':allay-variants')
 	include project(':damage-numbers')
+	// Topo is only part of the bundle when it is part of the build (include_topo, see settings.gradle).
+	if (rootProject.findProject(':topo') != null) {
+		include project(':topo')
+	}
 }

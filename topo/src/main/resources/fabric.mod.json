@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "topo",
+	"version": "${version}",
+	"name": "Topo",
+	"description": "A helpful mouse companion that fights for you, holds torches, shards and pearls, and dances after a win.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/topo/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.jett.topomod.topo.TopoMod"
+		],
+		"client": [
+			"dev.jett.topomod.topo.client.TopoModClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

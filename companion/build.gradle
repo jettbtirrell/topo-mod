@@ -1,5 +1,0 @@
-dependencies {
-	// Dev runs only: also load the damage numbers mod, so ./gradlew :companion:runClient tests both together.
-	// (Not part of the companion jar; players choose which jars to install.)
-	localRuntime project(':damage-numbers')
-}
