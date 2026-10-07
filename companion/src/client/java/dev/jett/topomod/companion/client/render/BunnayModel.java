@@ -16,6 +16,9 @@ import net.minecraft.util.Ease;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
+
 // Bunnay: the cube layout below is generated from companion/art/bunnay.bbmodel by
 // `python3 companion/art/import_bbmodel.py companion/art/bunnay.bbmodel <this file> <texture>`;
 // the animation under it relies on these part names, so keep them if the model is edited.
@@ -142,7 +145,8 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	private void animateArms(BunnayRenderState state) {
 		float cycle = state.ageInTicks * 9.0F * Mth.DEG_TO_RAD;
 		float moving = Math.min(state.walkAnimationSpeed / 0.3F, 1.0F);
-		float still = 1.0F - moving;
+		// The slow sway is for standing still: no sway in the air, where the hop pose holds the arms.
+		float still = state.hopAnimationState.isStarted() ? 0.0F : 1.0F - moving;
 
 		float flare = ARM_FLARE - Mth.sin(cycle) * Mth.PI * 0.075F * still;
 		this.leftArm.zRot = -flare;
@@ -294,21 +298,46 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 
 	/** Sitting: how far the body, head and arms drop (a leg's height, so the bottom rests on the ground). */
 	private static final float SIT_DROP = 2.0F;
+	/**
+	 * The angles a player's legs take when sitting (riding): HumanoidModel's passenger pose. Each leg turns forward 81 degrees,
+	 * and splays out 18 degrees and rolls out 4.5 degrees, the right leg one way and the left the other.
+	 */
+	private static final float SIT_LEG_PITCH = -1.4137167F;
+	private static final float SIT_LEG_SPLAY = 0.31415927F;
+	private static final float SIT_LEG_ROLL = 0.07853982F;
 
 	/**
-	 * Sits down: the body, head and arms drop so the bottom rests on the ground, and the legs lie flat, sticking straight
-	 * out in front of the body. A leg pivots at its foot, so turned forward 90 degrees it lies with its top end behind its
-	 * foot; it is moved up half its thickness (so it lies on the ground) and forward (so the feet are in front of the body).
+	 * Sits down: the body, head and arms drop so the bottom rests on the ground, and the legs take the angles of a player's
+	 * seated legs, with the hips where they would be on the ground in front of the body. A leg pivots at its foot, not its hip,
+	 * so to turn about the hip it is moved: the hip is put where it should be (a pixel above the ground, a pixel in front of
+	 * the middle of the body) and the foot's pivot is worked out from the leg's angles, which are those of a player's
+	 * (HumanoidModel's passenger pose).
 	 */
 	private void animateSit() {
 		for (ModelPart part : new ModelPart[]{this.body, this.head, this.leftArm, this.rightArm}) {
 			part.y += SIT_DROP;
 		}
-		for (ModelPart leg : new ModelPart[]{this.leftLeg, this.rightLeg}) {
-			leg.xRot = -Mth.HALF_PI;
-			leg.y -= 1.0F;
-			leg.z -= 3.0F;
-		}
+		this.seatLeg(this.rightLeg, 1.0F);
+		this.seatLeg(this.leftLeg, -1.0F);
+	}
+
+	/** Puts one leg in the seated pose; side is 1 for the right leg and -1 for the left. */
+	private void seatLeg(ModelPart leg, float side) {
+		float hipX = leg.x;
+		float hipY = leg.y - 1.0F;
+		float hipZ = leg.z - 1.0F;
+		float xRot = SIT_LEG_PITCH;
+		float yRot = SIT_LEG_SPLAY * side;
+		float zRot = SIT_LEG_ROLL * side;
+		// Where the hip is from the foot's pivot, with the leg turned: the leg's top end is a leg's height straight up (y is down)
+		// from the pivot, and the part rotates z, then y, then x.
+		Vector3f hipFromFoot = new Vector3f(0.0F, -LEG_HEIGHT, 0.0F).rotate(new Quaternionf().rotationZYX(zRot, yRot, xRot));
+		leg.xRot = xRot;
+		leg.yRot = yRot;
+		leg.zRot = zRot;
+		leg.x = hipX - hipFromFoot.x;
+		leg.y = hipY - hipFromFoot.y;
+		leg.z = hipZ - hipFromFoot.z;
 	}
 
 	/** Height of the ground in model space; the dance sways the whole model about the feet. */
