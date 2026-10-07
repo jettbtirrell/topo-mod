@@ -39,6 +39,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -60,10 +61,12 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
 import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.entity.player.Player;
@@ -177,6 +180,29 @@ public class BunnayEntity extends TamableAnimal {
 	private static final float READY_RISE = 0.25F;
 	private static final float READY_FALL = 0.15F;
 
+	// Fleeing at low health. A tamed bunnay at FLEE_BELOW_HEALTH or lower stops fighting and runs from the enemies instead: it
+	// takes no target at all (so its owner's fights, and whatever hurts it, do not pull it in), keeps away from the mobs near
+	// it, putting the ones that are after it first, and hops along its escape route at a much shorter hop cooldown. It runs
+	// at the speed a pet runs from fire. Once nothing is near it and it has had a quiet moment, it eats a carrot as usual,
+	// and when it is back above that health it fights again.
+	private static final float FLEE_BELOW_HEALTH = 20.0F;
+	/** The speed it runs at, the same as the panic goal's: what a pet does when it is on fire. */
+	private static final double FLEE_SPEED = 1.5;
+	/** It looks this far (in blocks) for mobs that are after it, and for any hostile mob this close. */
+	private static final double FLEE_SEARCH_RADIUS = 24.0;
+	private static final double FLEE_ENEMY_RADIUS = 10.0;
+	/** A mob that is after it counts this many times more than one that is only near, in working out which way is away. */
+	private static final double FLEE_TARGETING_WEIGHT = 3.0;
+	/** How far it picks a place to run to: horizontally and vertically, in blocks. */
+	private static final int FLEE_AWAY_RANGE = 14;
+	private static final int FLEE_AWAY_VERTICAL = 7;
+	/** Ticks between looks at what is around it, and between choosing a new place to run to. */
+	private static final int FLEE_SCAN_TICKS = 5;
+	private static final int FLEE_REPATH_TICKS = 10;
+	/** While it flees its hop cooldown is this many ticks: 20 to 40, a second or two, not the usual 5 to 7 seconds. */
+	private static final int FLEE_HOP_COOLDOWN_MIN = 20;
+	private static final int FLEE_HOP_COOLDOWN_RANGE = 21;
+
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
 	// straight into its food slot. It only does this where mobs are allowed to grief, and never strays far from its owner.
@@ -265,6 +291,8 @@ public class BunnayEntity extends TamableAnimal {
 	private int hopCooldown;
 	/** Whether its follow-the-owner goal is running, which is when it hops towards its owner even if it cannot walk there. */
 	private boolean following;
+	/** Whether its flee goal is running (see FLEE_BELOW_HEALTH). */
+	private boolean fleeing;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
 		super(type, level);
@@ -351,7 +379,8 @@ public class BunnayEntity extends TamableAnimal {
 			&& !this.isInWater()
 			&& !this.isHopping()
 			&& !this.isDancing()
-			&& !this.isPassenger();
+			&& !this.isPassenger()
+			&& !this.fleeing;
 	}
 
 	/** Whether another ordinary carrot would fit in the food slot (it is empty, or holds carrots with room; golden ones do not mix). */
@@ -373,6 +402,39 @@ public class BunnayEntity extends TamableAnimal {
 	private boolean canTakeCarrots() {
 		ItemStack held = this.food.getItem(0);
 		return held.isEmpty() || (held.is(Items.CARROT) && held.getCount() < held.getMaxStackSize());
+	}
+
+	/** Low on health, and tame: it runs from fights instead of taking part in them (see FLEE_BELOW_HEALTH). */
+	private boolean isScared() {
+		return this.isTame() && this.getHealth() <= FLEE_BELOW_HEALTH;
+	}
+
+	// While it is scared it takes no target, whoever asks: its owner's fight, its owner being hit, or a mob that hurt it.
+	@Override
+	public void setTarget(@Nullable LivingEntity target) {
+		if (target != null && this.isScared()) {
+			return;
+		}
+		super.setTarget(target);
+	}
+
+	/** Mobs it runs from: anything that is after it, and any hostile mob close by. */
+	private List<Mob> findThreats() {
+		return this.level().getEntitiesOfClass(
+			Mob.class,
+			this.getBoundingBox().inflate(FLEE_SEARCH_RADIUS),
+			mob -> mob != this && mob.isAlive() && (mob.getTarget() == this
+				|| (mob instanceof Enemy && mob.distanceToSqr(this) <= FLEE_ENEMY_RADIUS * FLEE_ENEMY_RADIUS))
+		);
+	}
+
+	/** A hop that gets it further from a point (its threats), used when there is no route to run along. */
+	private @Nullable Hop planAwayHop(Vec3 threatCenter) {
+		double now = this.position().distanceTo(threatCenter);
+		return this.planHop(landing -> {
+			double away = landing.distanceTo(threatCenter);
+			return away < now + HOP_MIN_DISTANCE ? Double.MAX_VALUE : -away;
+		}, Double.MAX_VALUE / 2.0);
 	}
 
 	/** Starts, plays and finishes eating the carrot in its off hand. The server decides; the client just shows the pose. */
@@ -577,6 +639,9 @@ public class BunnayEntity extends TamableAnimal {
 	public void aiStep() {
 		super.aiStep();
 		if (!this.level().isClientSide()) {
+			if (this.isScared() && this.getTarget() != null) {
+				this.setTarget(null);
+			}
 			this.tickEating();
 			if (this.giftCooldown > 0) {
 				this.giftCooldown--;
@@ -797,6 +862,9 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	protected void registerGoals() {
+		// Fleeing is priority 1 so that it beats the chase, following and everything else (and it hops itself, since the hop goal
+		// could not run beside it).
+		this.goalSelector.addGoal(1, new FleeGoal(this));
 		this.goalSelector.addGoal(1, new FloatGoal(this));
 		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
 		// Sitting is priority 2, as it is for a wolf: below floating and panicking, above everything else. What used to be
@@ -1029,6 +1097,128 @@ public class BunnayEntity extends TamableAnimal {
 		return SoundEvents.RABBIT_DEATH;
 	}
 
+	/**
+	 * Runs from the enemies when it is low on health (see FLEE_BELOW_HEALTH). It looks around every few ticks for what to run
+	 * from, picks a place well away from them (weighted towards the ones that are after it) that it can walk to, and runs
+	 * there at FLEE_SPEED, picking again as it goes. Whenever its hop is off cooldown it hops along that route instead (the
+	 * cooldown is short while it flees); with no route, a hop that gets it further away. It ends when nothing is near it.
+	 */
+	private static final class FleeGoal extends Goal {
+		private final BunnayEntity bunnay;
+		private final HopRun hop;
+		private List<Mob> threats = List.of();
+		private Vec3 threatCenter = Vec3.ZERO;
+		private int scanDelay;
+		private int repathDelay;
+
+		FleeGoal(BunnayEntity bunnay) {
+			this.bunnay = bunnay;
+			this.hop = new HopRun(bunnay);
+			// No JUMP flag, so that it keeps floating if it ends up in water.
+			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+		}
+
+		private boolean ready() {
+			return this.bunnay.isScared() && !this.bunnay.isOrderedToSit() && !this.bunnay.isPassenger() && !this.bunnay.isBaby();
+		}
+
+		/** What it is running from, and the middle of it: nearer mobs and mobs that are after it count for more. */
+		private void look() {
+			this.threats = this.bunnay.findThreats();
+			Vec3 sum = Vec3.ZERO;
+			double total = 0.0;
+			for (Mob mob : this.threats) {
+				double weight = (mob.getTarget() == this.bunnay ? FLEE_TARGETING_WEIGHT : 1.0) / (this.bunnay.distanceTo(mob) + 2.0);
+				sum = sum.add(mob.position().scale(weight));
+				total += weight;
+			}
+			this.threatCenter = total > 0.0 ? sum.scale(1.0 / total) : Vec3.ZERO;
+		}
+
+		@Override
+		public boolean canUse() {
+			if (!this.ready() || --this.scanDelay > 0) {
+				return false;
+			}
+			this.scanDelay = FLEE_SCAN_TICKS;
+			this.look();
+			return !this.threats.isEmpty();
+		}
+
+		@Override
+		public boolean canContinueToUse() {
+			return this.hop.running || (this.ready() && !this.threats.isEmpty());
+		}
+
+		@Override
+		public boolean requiresUpdateEveryTick() {
+			return true;
+		}
+
+		@Override
+		public void start() {
+			this.bunnay.fleeing = true;
+			// A long wait left over from an ordinary hop does not hold up the escape.
+			this.bunnay.hopCooldown = Math.min(this.bunnay.hopCooldown, FLEE_HOP_COOLDOWN_MIN);
+			this.bunnay.stopEating();
+			this.bunnay.setTarget(null);
+			this.bunnay.getNavigation().stop();
+			this.repathDelay = 0;
+		}
+
+		@Override
+		public void tick() {
+			if (this.hop.running) {
+				this.hop.tick();
+				return;
+			}
+			if (this.bunnay.tickCount % FLEE_SCAN_TICKS == 0) {
+				this.look();
+			}
+			if (this.threats.isEmpty()) {
+				return;
+			}
+			// Hop along the way it is running when it can; with no way to run, hop away if there is somewhere to.
+			if (this.bunnay.hopCooldown <= 0 && this.bunnay.canHopNow() && this.bunnay.tickCount % HOP_SCAN_INTERVAL == 0) {
+				Hop plan = this.bunnay.planTravelHop();
+				if (plan == null && !this.bunnay.getNavigation().isInProgress()) {
+					plan = this.bunnay.planAwayHop(this.threatCenter);
+				}
+				if (plan != null) {
+					this.hop.start(plan);
+					return;
+				}
+			}
+			if (--this.repathDelay <= 0 || this.bunnay.getNavigation().isDone()) {
+				this.repathDelay = FLEE_REPATH_TICKS;
+				this.runAway();
+			}
+		}
+
+		/** Picks a place away from the threats that it can walk to, and sets off for it. */
+		private void runAway() {
+			double now = this.bunnay.position().distanceTo(this.threatCenter);
+			for (int attempt = 0; attempt < 6; attempt++) {
+				Vec3 spot = DefaultRandomPos.getPosAway(this.bunnay, FLEE_AWAY_RANGE, FLEE_AWAY_VERTICAL, this.threatCenter);
+				if (spot == null || spot.distanceTo(this.threatCenter) <= now) {
+					continue;
+				}
+				Path path = this.bunnay.getNavigation().createPath(spot.x, spot.y, spot.z, 0);
+				if (path != null && path.canReach()) {
+					this.bunnay.getNavigation().moveTo(path, FLEE_SPEED);
+					return;
+				}
+			}
+		}
+
+		@Override
+		public void stop() {
+			this.hop.stop();
+			this.bunnay.fleeing = false;
+			this.bunnay.getNavigation().stop();
+		}
+	}
+
 	/** Follows its owner like any pet, and lets the bunnay know when it is doing it (see HopGoal and planTravelHop). */
 	private static final class BunnayFollowOwnerGoal extends FollowOwnerGoal {
 		private final BunnayEntity bunnay;
@@ -1114,7 +1304,9 @@ public class BunnayEntity extends TamableAnimal {
 			}
 			this.running = false;
 			this.bunnay.entityData.set(DATA_HOPPING, false);
-			this.bunnay.hopCooldown = HOP_COOLDOWN_MIN + this.bunnay.getRandom().nextInt(HOP_COOLDOWN_RANGE);
+			boolean fleeing = this.bunnay.fleeing;
+			this.bunnay.hopCooldown = (fleeing ? FLEE_HOP_COOLDOWN_MIN : HOP_COOLDOWN_MIN)
+				+ this.bunnay.getRandom().nextInt(fleeing ? FLEE_HOP_COOLDOWN_RANGE : HOP_COOLDOWN_RANGE);
 		}
 	}
 
