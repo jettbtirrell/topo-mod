@@ -130,7 +130,7 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 
 		// Keyframed clips go on last: they are offsets from the pose above.
 		this.idleAnimation.apply(state.idleAnimationState, state.ageInTicks);
-		this.hopAnimation.apply(state.hopAnimationState, state.ageInTicks);
+		this.hopAnimation.apply(state.hopAnimationState, state.ageInTicks, BunnayAnimation.HOP_CLIP_TICKS / Math.max(state.hopAirTicks, 1.0F));
 	}
 
 	/**
@@ -159,11 +159,6 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	private static final float SHOULDER_OFFSET = 2.5F;
 	/** How far the item flips for a reverse grip, in degrees; positive turns the tip forward and then down. */
 	private static final float REVERSE_GRIP_DEGREES = 180.0F;
-	// When the flip out and the flip back happen, in seconds into the hop clip: out as the arms whip up, back as they come down.
-	private static final float SPIN_OUT_START = 0.17F;
-	private static final float SPIN_OUT_END = 0.32F;
-	private static final float SPIN_BACK_START = 0.75F;
-	private static final float SPIN_BACK_END = 0.97F;
 
 	/**
 	 * The weapon arm in the ready stance: raised forward by about 50 degrees (negative is forward and up; 0 hangs down).
@@ -201,31 +196,12 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 	}
 
 	/**
-	 * How far the held item is turned about the hand, in degrees, during the hop. The hop whips the arm up and
-	 * forward, which points the item up through the head, so the item flips forward into a reverse grip (blade away
-	 * from the head) as the arm goes up, stays flipped in the air, then flips back as the arm comes down to land. The
-	 * times are seconds into the hop clip and line up with BunnayAnimation.HOP.
+	 * How far the held item is turned about the hand, in degrees. While the hop is playing the arms are up and forward, which
+	 * would point the item up through the head, so the item is held flipped into a reverse grip (blade away from the head,
+	 * pointing down) for as long as the hop lasts, and snaps back to the normal grip when it ends, like the pose itself.
 	 */
 	private static float itemSpinDegrees(BunnayRenderState state) {
-		if (!state.hopAnimationState.isStarted()) {
-			return 0.0F;
-		}
-		float t = state.hopAnimationState.getTimeInMillis(state.ageInTicks) / 1000.0F;
-		if (t <= SPIN_OUT_START || t >= SPIN_BACK_END) {
-			return 0.0F;
-		}
-		if (t < SPIN_OUT_END) {
-			return REVERSE_GRIP_DEGREES * smoothstep((t - SPIN_OUT_START) / (SPIN_OUT_END - SPIN_OUT_START));
-		}
-		if (t <= SPIN_BACK_START) {
-			return REVERSE_GRIP_DEGREES;
-		}
-		return REVERSE_GRIP_DEGREES * (1.0F - smoothstep((t - SPIN_BACK_START) / (SPIN_BACK_END - SPIN_BACK_START)));
-	}
-
-	private static float smoothstep(float x) {
-		float clamped = Mth.clamp(x, 0.0F, 1.0F);
-		return clamped * clamped * (3.0F - 2.0F * clamped);
+		return state.hopAnimationState.isStarted() ? REVERSE_GRIP_DEGREES : 0.0F;
 	}
 
 	/** The off hand in the eating pose: raised forward and turned in, so the carrot in it is at the mouth. */

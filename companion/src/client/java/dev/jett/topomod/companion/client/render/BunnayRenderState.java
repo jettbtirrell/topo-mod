@@ -6,6 +6,8 @@ import net.minecraft.world.entity.AnimationState;
 public class BunnayRenderState extends ArmedEntityRenderState {
 	/** Plays the hop; copied from the entity each frame. */
 	public final AnimationState hopAnimationState = new AnimationState();
+	/** How many ticks the current hop spends in the air; the hop clip is played at the speed that makes it fit. */
+	public float hopAirTicks = 15.0F;
 	/** Plays the idle; copied from the entity each frame. */
 	public final AnimationState idleAnimationState = new AnimationState();
 	/** True while it is dancing to a jukebox. */

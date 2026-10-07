@@ -15,8 +15,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-// DEBUG: /topo bunnay_hop makes the nearest bunnay do a normal hop, and /topo bunnay_quick_hop a flee-style one (almost no
-// crouch, keeps its momentum), each away from where you are standing, so the two can be compared.
+// DEBUG: /topo bunnay_hop makes the nearest bunnay hop away from where you are standing, to preview the hop.
 // To remove: delete this file, its register() call in CompanionMod, and debugHop in BunnayEntity.
 public final class TopoDebugCommand {
 	private static final double SEARCH_RANGE = 32.0;
@@ -28,11 +27,10 @@ public final class TopoDebugCommand {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			dispatcher.register(Commands.literal("topo")
 				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-				.then(Commands.literal("bunnay_hop").executes(context -> hop(context, false)))
-				.then(Commands.literal("bunnay_quick_hop").executes(context -> hop(context, true)))));
+				.then(Commands.literal("bunnay_hop").executes(TopoDebugCommand::hop))));
 	}
 
-	private static int hop(CommandContext<CommandSourceStack> context, boolean quick) {
+	private static int hop(CommandContext<CommandSourceStack> context) {
 		CommandSourceStack source = context.getSource();
 		Vec3 pos = source.getPosition();
 		List<BunnayEntity> bunnays = source.getLevel().getEntitiesOfClass(BunnayEntity.class,
@@ -42,11 +40,11 @@ public final class TopoDebugCommand {
 			source.sendFailure(Component.literal("No bunnay within " + (int) SEARCH_RANGE + " blocks."));
 			return 0;
 		}
-		if (!bunnay.debugHop(pos, quick)) {
+		if (!bunnay.debugHop(pos)) {
 			source.sendFailure(Component.literal("That bunnay cannot hop right now (it has to be standing on the ground, with somewhere to land)."));
 			return 0;
 		}
-		source.sendSuccess(() -> Component.literal("Bunnay will do a " + (quick ? "quick (flee)" : "normal") + " hop away from you."), false);
+		source.sendSuccess(() -> Component.literal("Bunnay will hop away from you."), false);
 		return 1;
 	}
 }

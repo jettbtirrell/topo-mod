@@ -13,11 +13,16 @@ public final class BunnayAnimation {
 	private static final AnimationChannel.Interpolation SMOOTH = AnimationChannel.Interpolations.CATMULLROM;
 
 	/**
-	 * The hop: crouch (0 to 0.2s), launch, airborne (0.2 to 0.95s), landing squash and recover (0.95 to 1.3s).
-	 * The timings match BunnayEntity: the launch happens at tick 4 (0.2s) and the landing about 15 ticks later, so
-	 * keep HOP_TAKEOFF_TICK, HOP_AIR_TICKS and HOP_TICKS there in step with this.
+	 * The hop, done the way the frog's jump is: one pose, held for as long as the bunnay is in the air (the entity starts it
+	 * at takeoff and stops it at landing). The body, head, arms and legs are two keyframes with the same values, so they hold
+	 * still. There is no crouch and no landing squash: it snaps into the pose when it leaves the ground and out of it when it
+	 * touches down. The ears are the exception: they do what the real rabbit's do over its hop (flick forward, swing back, settle
+	 * again), taken from the rabbit's own clip, whose length this clip has. It is played at HOP_CLIP_TICKS divided by the ticks
+	 * the hop spends in the air, so the ears always finish as it lands.
 	 */
 	public static final AnimationDefinition HOP = build();
+	/** How many ticks the hop clip lasts at normal speed (0.75 seconds, the rabbit's hop). */
+	public static final float HOP_CLIP_TICKS = 15.0F;
 
 	/**
 	 * The idle, adapted from the rabbit's: a four second clip where it perks up, looks to one side and then the
@@ -33,62 +38,38 @@ public final class BunnayAnimation {
 	}
 
 	private static AnimationDefinition build() {
-		AnimationDefinition.Builder hop = AnimationDefinition.Builder.withLength(1.3F);
+		AnimationDefinition.Builder hop = AnimationDefinition.Builder.withLength(0.75F);
 
-		// The body, head and arms drop into the crouch and rise through the jump together, and the legs have to rise
-		// with them or a gap opens up. So both are driven from this one table of rows, (time, how far the body is
-		// offset in pixels with y down, how far the legs are tilted back in degrees), and both tracks are linear:
-		// a smoothed curve can overshoot differently for the body and the legs, which is what made the gap.
-		float[][] rows = {
-			{0.00F, 0.0F, 0.0F}, {0.17F, 1.6F, 0.0F}, {0.25F, -0.8F, 15.0F}, {0.40F, -0.6F, 30.0F}, {0.60F, -0.4F, 30.0F},
-			{0.80F, -0.4F, 20.0F}, {0.90F, -0.4F, -5.0F}, {0.95F, -0.5F, -10.0F}, {1.00F, 1.4F, -8.0F},
-			{1.12F, 1.4F, 0.0F}, {1.30F, 0.0F, 0.0F}
-		};
-		Keyframe[] torso = new Keyframe[rows.length];
-		for (int i = 0; i < rows.length; i++) {
-			torso[i] = linearPos(rows[i][0], rows[i][1], 0.0F);
-		}
+		// The body, head and arms ride up a little with the jump, and the legs have to rise with them or a gap opens up.
+		Keyframe[] torso = {linearPos(0.0F, HOP_LIFT, 0.0F), linearPos(0.75F, HOP_LIFT, 0.0F)};
 		for (String bone : new String[]{"body", "head", "left_arm", "right_arm"}) {
 			hop.addAnimation(bone, new AnimationChannel(AnimationChannel.Targets.POSITION, torso));
 		}
+		hop.addAnimation("head", new AnimationChannel(AnimationChannel.Targets.ROTATION, rot(0.0F, HOP_HEAD_PITCH, 0.0F), rot(0.75F, HOP_HEAD_PITCH, 0.0F)));
+		hop.addAnimation("left_arm", new AnimationChannel(AnimationChannel.Targets.ROTATION, armPose(-1.0F)));
+		hop.addAnimation("right_arm", new AnimationChannel(AnimationChannel.Targets.ROTATION, armPose(1.0F)));
 
-		// Head: looks down into the crouch, snaps up at takeoff, then dips to look at the landing.
-		hop.addAnimation("head", new AnimationChannel(AnimationChannel.Targets.ROTATION,
-			rot(0.00F, 0.0F, 0.0F), rot(0.17F, 15.0F, 0.0F), rot(0.25F, -20.0F, 0.0F), rot(0.60F, -10.0F, 0.0F),
-			rot(0.90F, 10.0F, 0.0F), rot(1.00F, 18.0F, 0.0F), rot(1.12F, 8.0F, 0.0F), rot(1.30F, 0.0F, 0.0F)));
-
-		// Arms: wind back in the crouch, whip up and forward at takeoff, out for balance in the air (the extra
-		// flare is negative z for the left arm and positive for the right), then absorb the landing.
-		hop.addAnimation("left_arm", new AnimationChannel(AnimationChannel.Targets.ROTATION, armSwing(-1.0F)));
-		hop.addAnimation("right_arm", new AnimationChannel(AnimationChannel.Targets.ROTATION, armSwing(1.0F)));
-
-		// Legs: they are only two pixels tall, so they can't stretch or squash; they just tilt back for the jump and
-		// reach forward a little to land, never further than they swing when walking.
-		Keyframe[] legRotation = new Keyframe[rows.length];
-		Keyframe[] legPosition = new Keyframe[rows.length];
-		for (int i = 0; i < rows.length; i++) {
-			float angle = rows[i][2] * Mth.DEG_TO_RAD;
-			// The leg's model pivot is at its foot, so to swing about the hip it has to move: back by 2 sin(angle) and
-			// up by 2 (1 - cos(angle)) (y is down). It also rides up with the body, but doesn't follow it down into the
-			// crouch, since the feet stay on the ground.
-			float back = LEG_HEIGHT * Mth.sin(angle);
-			float up = LEG_HEIGHT * (Mth.cos(angle) - 1.0F);
-			legRotation[i] = rot(rows[i][0], rows[i][2], 0.0F);
-			legPosition[i] = linearPos(rows[i][0], up + Math.min(rows[i][1], 0.0F), back);
-		}
+		// Legs: they are only two pixels tall, so they can't stretch or squash; they just tilt back. The leg's model pivot is at
+		// its foot, so to swing about the hip it has to move: back by 2 sin(angle) and up by 2 (1 - cos(angle)) (y is down).
+		float angle = HOP_LEG_TILT * Mth.DEG_TO_RAD;
+		float back = LEG_HEIGHT * Mth.sin(angle);
+		float up = LEG_HEIGHT * (Mth.cos(angle) - 1.0F) + Math.min(HOP_LIFT, 0.0F);
 		for (String leg : new String[]{"left_leg", "right_leg"}) {
-			hop.addAnimation(leg, new AnimationChannel(AnimationChannel.Targets.ROTATION, legRotation));
-			hop.addAnimation(leg, new AnimationChannel(AnimationChannel.Targets.POSITION, legPosition));
+			hop.addAnimation(leg, new AnimationChannel(AnimationChannel.Targets.ROTATION, rot(0.0F, HOP_LEG_TILT, 0.0F), rot(0.75F, HOP_LEG_TILT, 0.0F)));
+			hop.addAnimation(leg, new AnimationChannel(AnimationChannel.Targets.POSITION, linearPos(0.0F, up, back), linearPos(0.75F, up, back)));
 		}
 
-		// Ears stream back going up, flutter on the way down, then flop forward on impact and bounce back.
-		Keyframe[] ears = {
-			rot(0.00F, 0.0F, 0.0F), rot(0.17F, 10.0F, 0.0F), rot(0.25F, -35.0F, 0.0F), rot(0.60F, -25.0F, 0.0F),
-			rot(0.90F, -40.0F, 0.0F), rot(1.00F, 30.0F, 0.0F), rot(1.12F, 15.0F, 0.0F), rot(1.22F, -8.0F, 0.0F),
-			rot(1.30F, 0.0F, 0.0F)
-		};
-		hop.addAnimation("left_ear", new AnimationChannel(AnimationChannel.Targets.ROTATION, ears));
-		hop.addAnimation("right_ear", new AnimationChannel(AnimationChannel.Targets.ROTATION, ears));
+		// Ears: the real rabbit's hop (RabbitAnimation.HOP), keyframe for keyframe. A touch forward as it leaves the ground, then
+		// streamed back (the left a little further than the right, as in the rabbit), held there, and settling by the landing.
+		// They also dip a fraction of a pixel (the rabbit's y offsets; posVec takes y up).
+		hop.addAnimation("left_ear", new AnimationChannel(AnimationChannel.Targets.ROTATION,
+			rot(0.000F, 0.0F, 0.0F), rot(0.125F, 2.5F, 0.0F), rot(0.375F, -48.5F, 0.0F), rot(0.542F, -41.24F, 0.0F), rot(0.750F, 0.0F, 0.0F)));
+		hop.addAnimation("right_ear", new AnimationChannel(AnimationChannel.Targets.ROTATION,
+			rot(0.000F, 0.0F, 0.0F), rot(0.125F, 7.5F, 0.0F), rot(0.375F, -31.5F, 0.0F), rot(0.500F, -35.33F, 0.0F), rot(0.750F, 0.0F, 0.0F)));
+		hop.addAnimation("left_ear", new AnimationChannel(AnimationChannel.Targets.POSITION,
+			earDip(0.000F, 0.0F), earDip(0.208F, -0.2F), earDip(0.375F, -0.3F), earDip(0.750F, 0.0F)));
+		hop.addAnimation("right_ear", new AnimationChannel(AnimationChannel.Targets.POSITION,
+			earDip(0.000F, 0.0F), earDip(0.208F, -0.3F), earDip(0.375F, -0.23F), earDip(0.750F, 0.0F)));
 
 		return hop.build();
 	}
@@ -159,18 +140,27 @@ public final class BunnayAnimation {
 	 */
 	private static final float HOP_ARM_ROLL_DEGREES = -10.0F;
 
+	/** How far the body, head and arms are lifted in the pose, in pixels (y is down, so up is negative). */
+	private static final float HOP_LIFT = -0.5F;
+	/** The head's pitch and the legs' tilt back in the pose, in degrees. */
+	private static final float HOP_HEAD_PITCH = -10.0F;
+	private static final float HOP_LEG_TILT = 30.0F;
+	/** How far the arms are raised in the pose, in degrees (negative is forward and up). */
+	private static final float HOP_ARM_PITCH = -110.0F;
+
 	/**
-	 * The arm keyframes for one side; side is -1 for the left arm and 1 for the right. The right arm turns outward with a
-	 * positive y rotation and the left with a negative one, so the spread is the same number times side, as is the flare.
+	 * The arm pose for one side; side is -1 for the left arm and 1 for the right. The right arm turns outward with a
+	 * positive y rotation and the left with a negative one, so the spread is the same number times side, as is the roll.
 	 */
-	private static Keyframe[] armSwing(float side) {
+	private static Keyframe[] armPose(float side) {
 		float spread = HOP_ARM_SPREAD_DEGREES * side;
 		float roll = HOP_ARM_ROLL_DEGREES * side;
-		return new Keyframe[]{
-			rot(0.00F, 0.0F, 0.0F, 0.0F), rot(0.17F, 40.0F, 0.0F, 0.0F), rot(0.25F, -95.0F, spread, roll),
-			rot(0.60F, -110.0F, spread, roll), rot(0.90F, -70.0F, spread, roll), rot(1.00F, 25.0F, 0.0F, 0.0F),
-			rot(1.15F, 10.0F, 0.0F, 0.0F), rot(1.30F, 0.0F, 0.0F, 0.0F)
-		};
+		return new Keyframe[]{rot(0.0F, HOP_ARM_PITCH, spread, roll), rot(0.5F, HOP_ARM_PITCH, spread, roll)};
+	}
+
+	/** An ear's up and down offset, as the rabbit's clip gives it (y up, which posVec turns into the model's y down). */
+	private static Keyframe earDip(float time, float y) {
+		return new Keyframe(time, KeyframeAnimations.posVec(0.0F, y, 0.0F), SMOOTH);
 	}
 
 	/**
