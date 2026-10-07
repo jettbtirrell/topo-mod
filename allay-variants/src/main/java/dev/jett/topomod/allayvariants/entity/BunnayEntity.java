@@ -60,7 +60,6 @@ import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.pathfinder.Path;
-import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -124,20 +123,18 @@ public class BunnayEntity extends TamableAnimal {
 	static final int HOP_COOLDOWN_RANGE = 41;
 	/** While the hop is off cooldown it looks for somewhere to hop this often, in ticks. */
 	static final int HOP_SCAN_INTERVAL = 5;
-	/** How much smaller than its body the arc check treats it sideways (just enough to ignore rounding), and how far up the soles are lifted. */
+	/** How much smaller than its body the arc check treats it, sideways and under the feet: just enough to ignore rounding. */
 	static final double HOP_CLEARANCE = 0.001;
-	static final double HOP_SOLE_ROOM = 0.02;
-	/** A hop that has not landed this many ticks after it should have is called off (it was stopped by something, say). */
-	static final int HOP_LATE_TICKS = 10;
+	static final double HOP_SOLE_ROOM = 0.001;
 	/** It works out the arc of this many of the best landing spots before giving up. */
 	static final int HOP_MAX_TRIES = 12;
 	/**
 	 * What a mob does each tick while its friction is discarded (see Mob.setDiscardFriction, which the frog uses too), which the
 	 * arcs are worked out from: its sideways speed does not change, and its vertical speed just loses HOP_GRAVITY a tick (no
-	 * drag either), so the path is a plain parabola. It keeps this much of its sideways speed when it lands, so it runs on.
+	 * drag either), so the path is a plain parabola. It keeps this much of its sideways speed when it lands (the frog keeps 10%), so it runs on a little.
 	 */
 	static final double HOP_GRAVITY = 0.08;
-	static final double HOP_LANDING_MOMENTUM = 0.5;
+	static final double HOP_LANDING_MOMENTUM = 0.1;
 	/** After n ticks, the blocks covered per point of horizontal launch speed. */
 	private static final double[] HOP_REACH = new double[HOP_AIR_TICKS + 1];
 	/** After n ticks, the blocks risen per point of upward launch speed (that is, without gravity). */
@@ -499,6 +496,12 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	protected void customServerAiStep(ServerLevel level) {
+		// DEBUG: the hop made by /bunnay hop and /bunnay hoptest flies at the same point of the tick the Brain's hops do.
+		this.debugHopRun.tick();
+		if (this.hopTestMode) {
+			super.customServerAiStep(level);
+			return;
+		}
 		this.getBrain().tick(level, this);
 		BunnayAi.updateActivity(this);
 		super.customServerAiStep(level);
@@ -639,18 +642,6 @@ public class BunnayEntity extends TamableAnimal {
 		}
 		this.debugLog("flee: no way to run (no dry spot and no straight-away path)");
 		return null;
-	}
-
-	private float fleeSavedWaterMalus;
-
-	/** Fleeing, it swims as readily as it walks (the same as when it follows its owner), and puts that back afterwards. */
-	void setFleeSwimming(boolean on) {
-		if (on) {
-			this.fleeSavedWaterMalus = this.getPathfindingMalus(PathType.WATER);
-			this.setPathfindingMalus(PathType.WATER, 0.0F);
-		} else {
-			this.setPathfindingMalus(PathType.WATER, this.fleeSavedWaterMalus);
-		}
 	}
 
 	/** Mobs it runs from: whatever is after it (has it as its target), and nothing else. */
@@ -892,7 +883,6 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.getNavigation().isInProgress()) {
 				this.shortenJumpDelay(STEP_JUMP_DELAY);
 			}
-			this.debugHopRun.tick();
 			if (debugLogging && this.tickCount % 20 == 0 && (this.getTarget() != null || this.following || this.fleeing)) {
 				this.debugStatus();
 			}
@@ -1030,7 +1020,19 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	// DEBUG: a hop run that only TopoDebugCommand uses. Remove together with that command.
-	private final HopRun debugHopRun = new HopRun(this);
+	final HopRun debugHopRun = new HopRun(this);
+	/** DEBUG: set by /bunnay hoptest, so the Brain leaves the bunnay alone while its hops are measured. */
+	boolean hopTestMode;
+
+	/** DEBUG: the hop the planner would make to land exactly here, or null. */
+	@Nullable Hop planHopTo(Vec3 landing) {
+		return this.solveHop(landing);
+	}
+
+	/** DEBUG: why the last arc was refused. */
+	String lastSolveNote() {
+		return this.solveNote;
+	}
 
 	/** DEBUG: hops away from the given point. False if it cannot hop right now. */
 	public boolean debugHop(Vec3 awayFrom) {
@@ -1307,23 +1309,45 @@ public class BunnayEntity extends TamableAnimal {
 		double dirX = distance < 1.0E-4 ? 0.0 : dx / distance;
 		double dirZ = distance < 1.0E-4 ? 0.0 : dz / distance;
 		AABB body = this.getBoundingBox();
-		// Every half tick along the arc, with a little room so that brushing the floor at the end does not count.
-		for (int half = 1; half <= air * 2; half++) {
-			int low = half / 2;
-			int high = Math.min(low + 1, air);
-			double frac = (half % 2) * 0.5;
-			double across = Mth.lerp(frac, HOP_REACH[low], HOP_REACH[high]) * speed;
-			double height = Mth.lerp(frac, HOP_RISE[low] * up + HOP_SAG[low], HOP_RISE[high] * up + HOP_SAG[high]);
-			AABB at = body.move(dirX * across, height, dirZ * across);
-			// Sideways and overhead the body has to clear exactly (grazing a wall for even a hair stops that direction's speed for
-			// the rest of the flight); only the soles get some room, so brushing the floor at the landing does not count.
-			AABB box = new AABB(at.minX + HOP_CLEARANCE, at.minY + HOP_SOLE_ROOM, at.minZ + HOP_CLEARANCE, at.maxX - HOP_CLEARANCE, at.maxY, at.maxZ - HOP_CLEARANCE);
-			if (!this.level().noCollision(this, box)) {
-				this.solveNote = String.format("air %d: arc blocked %.2f blocks out and %.2f up", air, across, height);
+		// Each tick is checked the way the game moves a body: up or down first, where it stood, then along the larger sideways
+		// axis, then the other, each as the volume the body sweeps through (not just where it ends up), so an edge it passes
+		// over on the way down is found.
+		double previousAcross = 0.0;
+		double previousHeight = 0.0;
+		for (int tick = 1; tick <= air; tick++) {
+			double across = HOP_REACH[tick] * speed;
+			double height = HOP_RISE[tick] * up + HOP_SAG[tick];
+			double stepX = dirX * (across - previousAcross);
+			double stepZ = dirZ * (across - previousAcross);
+			AABB from = body.move(dirX * previousAcross, previousHeight, dirZ * previousAcross);
+			boolean clear = this.sweepClear(from, 0.0, height - previousHeight, 0.0);
+			AABB level = body.move(dirX * previousAcross, height, dirZ * previousAcross);
+			if (clear && Math.abs(stepX) >= Math.abs(stepZ)) {
+				clear = this.sweepClear(level, stepX, 0.0, 0.0) && this.sweepClear(level.move(stepX, 0.0, 0.0), 0.0, 0.0, stepZ);
+			} else if (clear) {
+				clear = this.sweepClear(level, 0.0, 0.0, stepZ) && this.sweepClear(level.move(0.0, 0.0, stepZ), stepX, 0.0, 0.0);
+			}
+			if (!clear) {
+				this.solveNote = String.format("air %d: arc blocked on tick %d (%.2f blocks out and %.2f up)", air, tick, across, height);
 				return null;
 			}
+			previousAcross = across;
+			previousHeight = height;
 		}
 		return new Hop(new Vec3(dirX * speed, up, dirZ * speed), landing, air);
+	}
+
+	/**
+	 * Whether a body can move by this much without touching anything. Sideways and overhead it has to clear exactly (grazing a wall
+	 * for even a hair stops that direction's speed for the rest of the flight); only the soles get some room, so brushing the
+	 * floor at the landing does not count.
+	 */
+	private boolean sweepClear(AABB from, double dx, double dy, double dz) {
+		AABB to = from.move(dx, dy, dz);
+		AABB box = new AABB(
+			Math.min(from.minX, to.minX) + HOP_CLEARANCE, Math.min(from.minY, to.minY) + HOP_SOLE_ROOM, Math.min(from.minZ, to.minZ) + HOP_CLEARANCE,
+			Math.max(from.maxX, to.maxX) - HOP_CLEARANCE, Math.max(from.maxY, to.maxY), Math.max(from.maxZ, to.maxZ) - HOP_CLEARANCE);
+		return this.level().noCollision(this, box);
 	}
 
 	@Override
@@ -1585,6 +1609,13 @@ public class BunnayEntity extends TamableAnimal {
 		private Hop hop;
 		private int ticks;
 		boolean running;
+		/** For /bunnay hoptest: where it was when the planned flight time was up, and where and when the hop ended. */
+		Vec3 arrival;
+		Vec3 endPosition;
+		int endTicks;
+		Hop plan() {
+			return this.hop;
+		}
 		// DEBUG-TEMP: where it was each tick of the hop, to explain a miss.
 		private Vec3 launchFrom = Vec3.ZERO;
 		private Vec3 launchVelocity = Vec3.ZERO;
@@ -1597,6 +1628,8 @@ public class BunnayEntity extends TamableAnimal {
 		void start(Hop hop) {
 			this.hop = hop;
 			this.ticks = 0;
+			this.arrival = null;
+			this.endPosition = null;
 			this.trace.clear();
 			this.running = true;
 			this.bunnay.getNavigation().stop();
@@ -1610,6 +1643,9 @@ public class BunnayEntity extends TamableAnimal {
 				return;
 			}
 			this.ticks++;
+			if (this.ticks == this.hop.airTicks() + 1) {
+				this.arrival = this.bunnay.position();
+			}
 			if (debugLogging && this.ticks > 1) {
 				Vec3 now = this.bunnay.position();
 				int t = Math.min(this.ticks - 1, HOP_AIR_TICKS);
@@ -1641,7 +1677,11 @@ public class BunnayEntity extends TamableAnimal {
 				// Down: friction is back, it keeps some of its speed, and it is free to move on this very tick.
 				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(HOP_LANDING_MOMENTUM, 1.0, HOP_LANDING_MOMENTUM));
 				this.stop();
-			} else if (this.ticks > this.hop.airTicks() + HOP_LATE_TICKS) {
+			} else if (this.ticks >= this.hop.airTicks() + 1) {
+				// The planned flight time is up and it is on the landing spot, whether or not its feet have registered the ground
+				// yet (they only do on the next tick, which would carry it a whole step past). It keeps some of its sideways
+				// speed, as it does when it lands early.
+				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(HOP_LANDING_MOMENTUM, 1.0, HOP_LANDING_MOMENTUM));
 				this.stop();
 			}
 		}
@@ -1652,6 +1692,8 @@ public class BunnayEntity extends TamableAnimal {
 				return;
 			}
 			this.running = false;
+			this.endPosition = this.bunnay.position();
+			this.endTicks = this.ticks;
 			this.bunnay.setDiscardFriction(false);
 			this.bunnay.entityData.set(DATA_HOPPING, false);
 			this.bunnay.debugLog("hop END at %s after %d ticks (aimed at %s, off by %.2f)", at(this.bunnay.position()), this.ticks,

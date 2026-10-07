@@ -469,7 +469,6 @@ final class BunnayBehaviors {
 		@Override
 		void begin(ServerLevel level, BunnayEntity bunnay) {
 			bunnay.fleeing = true;
-			bunnay.setFleeSwimming(true);
 			bunnay.stopEating();
 			bunnay.setTarget(null);
 			bunnay.getNavigation().stop();
@@ -502,7 +501,6 @@ final class BunnayBehaviors {
 		@Override
 		void end(ServerLevel level, BunnayEntity bunnay) {
 			bunnay.fleeing = false;
-			bunnay.setFleeSwimming(false);
 			bunnay.getNavigation().stop();
 		}
 	}
