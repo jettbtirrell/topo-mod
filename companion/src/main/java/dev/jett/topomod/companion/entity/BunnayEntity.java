@@ -105,6 +105,11 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int HOP_TICKS = 26;
 	/** Tick of the hop that the legs push off (the crouch lasts this long). */
 	private static final int HOP_TAKEOFF_TICK = 4;
+	/**
+	 * While it flees it takes off at this tick instead: the crouch is nearly gone. The clip is not changed; the client starts it
+	 * partway in (HOP_TAKEOFF_TICK - this ticks in, which is where the crouch is almost over) so the launch still lines up with it.
+	 */
+	private static final int FLEE_HOP_TAKEOFF_TICK = 1;
 	/** Ticks it spends in the air. Every hop is worked out to take exactly this long, whatever its length, so the clip always fits. */
 	private static final int HOP_AIR_TICKS = 15;
 	/** How far a hop can take it: 6 blocks along the ground (the frog's long jump is 4) and 2 up or down, the same as the frog's. */
@@ -202,6 +207,8 @@ public class BunnayEntity extends TamableAnimal {
 	/** While it flees its hop cooldown is this many ticks: 20 to 40, a second or two, not the usual 5 to 7 seconds. */
 	private static final int FLEE_HOP_COOLDOWN_MIN = 20;
 	private static final int FLEE_HOP_COOLDOWN_RANGE = 21;
+	/** While it flees it keeps this much of its sideways speed when it lands (an ordinary hop keeps 0.1), so it runs on. */
+	private static final double FLEE_LANDING_MOMENTUM = 0.5;
 
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
@@ -243,6 +250,8 @@ public class BunnayEntity extends TamableAnimal {
 	private static final EntityDataAccessor<Boolean> DATA_DANCING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	private static final EntityDataAccessor<Boolean> DATA_HOPPING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
+	/** Whether the current hop is a quick one (a flee hop), so the client starts its animation past the crouch. */
+	private static final EntityDataAccessor<Boolean> DATA_QUICK_HOP = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
 
 	/** Drives the hop animation on the client. */
 	public final AnimationState hopAnimationState = new AnimationState();
@@ -304,6 +313,7 @@ public class BunnayEntity extends TamableAnimal {
 	protected void defineSynchedData(SynchedEntityData.Builder entityData) {
 		super.defineSynchedData(entityData);
 		entityData.define(DATA_HOPPING, false);
+		entityData.define(DATA_QUICK_HOP, false);
 		entityData.define(DATA_EATING, false);
 		entityData.define(DATA_EATING_FOOD, ItemStack.EMPTY);
 		entityData.define(DATA_DANCING, false);
@@ -654,6 +664,11 @@ public class BunnayEntity extends TamableAnimal {
 
 	}
 
+	/** The current hop is a quick one: it skips most of the crouch (see FLEE_HOP_TAKEOFF_TICK). */
+	public boolean isQuickHop() {
+		return this.entityData.get(DATA_QUICK_HOP);
+	}
+
 	public boolean isHopping() {
 		return this.entityData.get(DATA_HOPPING);
 	}
@@ -820,7 +835,17 @@ public class BunnayEntity extends TamableAnimal {
 	public void tick() {
 		super.tick();
 		if (this.level().isClientSide()) {
-			this.hopAnimationState.animateWhen(this.isHopping(), this.tickCount);
+			if (this.isHopping()) {
+				if (!this.hopAnimationState.isStarted()) {
+					this.hopAnimationState.start(this.tickCount);
+					if (this.isQuickHop()) {
+						// Start past the crouch, so the launch lands on the clip's launch.
+						this.hopAnimationState.fastForward(HOP_TAKEOFF_TICK - FLEE_HOP_TAKEOFF_TICK, 1.0F);
+					}
+				}
+			} else {
+				this.hopAnimationState.stop();
+			}
 			this.tickIdleAnimation();
 			this.readyProgressO = this.readyProgress;
 			boolean ready = this.isAggressive() && this.isHoldingWeapon();
@@ -1170,7 +1195,11 @@ public class BunnayEntity extends TamableAnimal {
 		public void tick() {
 			if (this.hop.running) {
 				this.hop.tick();
-				return;
+				// Crouching or in the air there is nothing else to do. Once it has landed, what is left of the clip is only the
+				// squash and recovery, and it does not wait for that: it gets back to running while the animation plays out.
+				if (!this.hop.landed) {
+					return;
+				}
 			}
 			if (this.bunnay.tickCount % FLEE_SCAN_TICKS == 0) {
 				this.look();
@@ -1178,8 +1207,9 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.threats.isEmpty()) {
 				return;
 			}
-			// Hop along the way it is running when it can; with no way to run, hop away if there is somewhere to.
-			if (this.bunnay.hopCooldown <= 0 && this.bunnay.canHopNow() && this.bunnay.tickCount % HOP_SCAN_INTERVAL == 0) {
+			// Hop along the way it is running when it can; with no way to run, hop away if there is somewhere to. (Not while
+			// the last hop's recovery is still playing.)
+			if (!this.hop.running && this.bunnay.hopCooldown <= 0 && this.bunnay.canHopNow() && this.bunnay.tickCount % HOP_SCAN_INTERVAL == 0) {
 				Hop plan = this.bunnay.planTravelHop();
 				if (plan == null && !this.bunnay.getNavigation().isInProgress()) {
 					plan = this.bunnay.planAwayHop(this.threatCenter);
@@ -1252,6 +1282,9 @@ public class BunnayEntity extends TamableAnimal {
 		private int ticks;
 		private boolean landed;
 		private boolean running;
+		/** The tick it launches on and the tick the run ends on: a flee hop has almost no crouch, so both come sooner. */
+		private int takeoffTick = HOP_TAKEOFF_TICK;
+		private int totalTicks = HOP_TICKS;
 
 		HopRun(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -1262,7 +1295,11 @@ public class BunnayEntity extends TamableAnimal {
 			this.ticks = 0;
 			this.landed = false;
 			this.running = true;
+			boolean quick = this.bunnay.fleeing;
+			this.takeoffTick = quick ? FLEE_HOP_TAKEOFF_TICK : HOP_TAKEOFF_TICK;
+			this.totalTicks = HOP_TICKS - (HOP_TAKEOFF_TICK - this.takeoffTick);
 			this.bunnay.getNavigation().stop();
+			this.bunnay.entityData.set(DATA_QUICK_HOP, quick);
 			this.bunnay.entityData.set(DATA_HOPPING, true);
 		}
 
@@ -1271,7 +1308,7 @@ public class BunnayEntity extends TamableAnimal {
 				return;
 			}
 			this.ticks++;
-			if (this.ticks <= HOP_TAKEOFF_TICK) {
+			if (this.ticks <= this.takeoffTick) {
 				// Crouching, turn to face where it is going.
 				Vec3 way = this.hop.landing().subtract(this.bunnay.position());
 				float yaw = (float) Math.toDegrees(Math.atan2(way.z, way.x)) - 90.0F;
@@ -1279,7 +1316,7 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.yBodyRot = yaw;
 				this.bunnay.setYHeadRot(yaw);
 			}
-			if (this.ticks == HOP_TAKEOFF_TICK) {
+			if (this.ticks == this.takeoffTick) {
 				// Worked out again from where it is now, in case it has been nudged since it chose; if it cannot any more, it does not go.
 				Hop launch = this.bunnay.solveHop(this.hop.landing());
 				if (launch == null) {
@@ -1289,11 +1326,12 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.setDeltaMovement(launch.velocity());
 				this.bunnay.needsSync = true;
 				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
-			} else if (!this.landed && this.ticks > HOP_TAKEOFF_TICK + 2 && this.bunnay.onGround()) {
+			} else if (!this.landed && this.ticks > this.takeoffTick + 2 && this.bunnay.onGround()) {
 				this.landed = true;
-				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(0.1, 1.0, 0.1));
+				double keep = this.bunnay.fleeing ? FLEE_LANDING_MOMENTUM : 0.1;
+				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(keep, 1.0, keep));
 			}
-			if (this.ticks >= HOP_TICKS) {
+			if (this.ticks >= this.totalTicks) {
 				this.stop();
 			}
 		}
