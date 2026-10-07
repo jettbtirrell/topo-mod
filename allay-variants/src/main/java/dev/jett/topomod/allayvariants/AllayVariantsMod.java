@@ -4,6 +4,7 @@ import dev.jett.topomod.allayvariants.command.BunnayDebugCommand;
 import dev.jett.topomod.allayvariants.entity.BunnayBreeding;
 import dev.jett.topomod.allayvariants.registry.ModEntities;
 import dev.jett.topomod.allayvariants.registry.ModItems;
+import dev.jett.topomod.allayvariants.registry.ModLoot;
 import dev.jett.topomod.allayvariants.registry.ModMenus;
 import dev.jett.topomod.allayvariants.registry.ModSounds;
 
@@ -25,6 +26,7 @@ public class AllayVariantsMod implements ModInitializer {
 		ModMenus.register();
 		ModSounds.register();
 		ModItems.register();
+		ModLoot.register();
 		BunnayBreeding.register();
 		BunnayDebugCommand.register(); // DEBUG: remove with the command
 		LOGGER.info("Allay Variants loaded");
