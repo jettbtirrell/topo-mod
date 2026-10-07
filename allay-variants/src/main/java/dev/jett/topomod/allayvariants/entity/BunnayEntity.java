@@ -88,8 +88,8 @@ import org.jspecify.annotations.Nullable;
 // Bunnay: a bunny-allay cross that can be tamed with carrots. It follows its owner and fights like a wolf; holding
 // weapons, sitting and an item screen will be built on this the way they were for the topo.
 public class BunnayEntity extends TamableAnimal {
-	static final double WILD_HEALTH = 16.0;
-	static final double TAME_HEALTH = 80.0;
+	static final double WILD_HEALTH = 8.0;
+	static final double TAME_HEALTH = 40.0;
 
 	// Hopping, like a frog's long jump. Whenever the hop is off cooldown, the bunnay looks for a place within reach to land
 	// that gets it where it is going at least HOP_MIN_DISTANCE closer than walking would, and if there is one it hops there
@@ -162,7 +162,7 @@ public class BunnayEntity extends TamableAnimal {
 	static final int IDLE_MIN_TICKS = 180;
 	static final int IDLE_EXTRA_TICKS = 40;
 
-	// Fighting: it always swings its two hands in turn, an empty paw counting as a hand (the bunnay's own hit is 3). What it
+	// Fighting: it always swings its two hands in turn, an empty paw counting as a hand (the bunnay's own hit is 2). What it
 	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, or a stick
 	// +1. A breeze rod also blasts the foe the way a wind charge would; a blaze rod also does what a blaze's small
 	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way). All of them swing
@@ -1359,7 +1359,7 @@ public class BunnayEntity extends TamableAnimal {
 		return Animal.createAnimalAttributes()
 			.add(Attributes.MAX_HEALTH, WILD_HEALTH)
 			.add(Attributes.MOVEMENT_SPEED, 0.3)
-			.add(Attributes.ATTACK_DAMAGE, 3.0)
+			.add(Attributes.ATTACK_DAMAGE, 2.0)
 			// Swimming speed. A land mob moves at a crawl in water (about 1.6 blocks a second for this one); the water movement
 			// efficiency attribute (what Depth Strider sets, 0 to 1) closes that gap. 0.4 is about 2.8 times as fast, 4.5 blocks a
 			// second, roughly a walking pace; 0.2 is 2.1 times and 0.6 is 3.4 times.
