@@ -75,7 +75,7 @@ final class BunnaySensors {
 
 		@Override
 		public Set<MemoryModuleType<?>> requires() {
-			return Set.of(BunnayAi.FLEE_THREAT_CENTER);
+			return Set.of(BunnayAi.FLEE_THREAT_CENTER, BunnayAi.FLEE_AWAY);
 		}
 
 		@Override
@@ -83,22 +83,29 @@ final class BunnaySensors {
 			Brain<BunnayEntity> brain = bunnay.getBrain();
 			if (!bunnay.fleeReady()) {
 				brain.eraseMemory(BunnayAi.FLEE_THREAT_CENTER);
-				bunnay.debugThreats(List.of());
+				brain.eraseMemory(BunnayAi.FLEE_AWAY);
 				return;
 			}
 			List<Mob> threats = bunnay.findThreats();
-			bunnay.debugThreats(threats);
 			Vec3 sum = Vec3.ZERO;
+			Vec3 away = Vec3.ZERO;
 			double total = 0.0;
 			for (Mob mob : threats) {
 				double weight = 1.0 / (bunnay.distanceTo(mob) + 2.0);
 				sum = sum.add(mob.position().scale(weight));
+				// Each threat pushes it straight away from itself, the nearer ones harder, so threats on both sides cancel out.
+				Vec3 offset = bunnay.position().subtract(mob.position()).multiply(1.0, 0.0, 1.0);
+				if (offset.lengthSqr() > 1.0E-4) {
+					away = away.add(offset.normalize().scale(weight));
+				}
 				total += weight;
 			}
 			if (total > 0.0) {
 				brain.setMemory(BunnayAi.FLEE_THREAT_CENTER, sum.scale(1.0 / total));
+				brain.setMemory(BunnayAi.FLEE_AWAY, away);
 			} else {
 				brain.eraseMemory(BunnayAi.FLEE_THREAT_CENTER);
+				brain.eraseMemory(BunnayAi.FLEE_AWAY);
 			}
 		}
 	}

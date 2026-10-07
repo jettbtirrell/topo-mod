@@ -56,6 +56,8 @@ public final class BunnayAi {
 	static final MemoryModuleType<BlockPos> RIPE_CARROT = registerMemory("ripe_carrot");
 	/** The weighted middle of the mobs a scared bunnay is running from. */
 	static final MemoryModuleType<Vec3> FLEE_THREAT_CENTER = registerMemory("flee_threat_center");
+	/** The direction straight away from the mobs a scared bunnay runs from, all of them counted (nearer ones more). */
+	static final MemoryModuleType<Vec3> FLEE_AWAY = registerMemory("flee_away");
 	static final MemoryModuleType<LivingEntity> OWNER_HURT_BY = registerMemory("owner_hurt_by");
 	static final MemoryModuleType<LivingEntity> OWNER_HURT_TARGET = registerMemory("owner_hurt_target");
 
@@ -88,7 +90,7 @@ public final class BunnayAi {
 		MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, MemoryModuleType.LONG_JUMP_MID_JUMP, MemoryModuleType.GAZE_COOLDOWN_TICKS,
 		MemoryModuleType.NEAREST_LIVING_ENTITIES, MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES,
 		MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM, MemoryModuleType.LIKED_NOTEBLOCK_POSITION,
-		JOB_PRIORITY, EAT_COOLDOWN, DELIVER_COOLDOWN, NO_CROPS_FOUND, RIPE_CARROT, FLEE_THREAT_CENTER, OWNER_HURT_BY, OWNER_HURT_TARGET);
+		JOB_PRIORITY, EAT_COOLDOWN, DELIVER_COOLDOWN, NO_CROPS_FOUND, RIPE_CARROT, FLEE_THREAT_CENTER, FLEE_AWAY, OWNER_HURT_BY, OWNER_HURT_TARGET);
 
 	private static final ImmutableList<SensorType<? extends Sensor<? super BunnayEntity>>> SENSORS = ImmutableList.of(
 		SensorType.NEAREST_LIVING_ENTITIES, COMBAT_SENSOR, THREATS_SENSOR, GROUND_CARROTS_SENSOR, RIPE_CARROTS_SENSOR);

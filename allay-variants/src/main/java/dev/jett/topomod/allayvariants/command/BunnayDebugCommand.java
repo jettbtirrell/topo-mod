@@ -6,7 +6,6 @@ import java.util.List;
 import com.mojang.brigadier.context.CommandContext;
 
 import dev.jett.topomod.allayvariants.entity.BunnayEntity;
-import dev.jett.topomod.allayvariants.entity.BunnayHopTest;
 
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 
@@ -28,13 +27,7 @@ public final class BunnayDebugCommand {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			dispatcher.register(Commands.literal("bunnay")
 				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-				.then(Commands.literal("hop").executes(BunnayDebugCommand::hop))
-				.then(Commands.literal("hoptest")
-					.executes(context -> BunnayHopTest.start(context.getSource()) ? 1 : 0)
-					.then(Commands.literal("stop").executes(context -> {
-						BunnayHopTest.stop(context.getSource());
-						return 1;
-					})))));
+				.then(Commands.literal("hop").executes(BunnayDebugCommand::hop))));
 	}
 
 	private static int hop(CommandContext<CommandSourceStack> context) {

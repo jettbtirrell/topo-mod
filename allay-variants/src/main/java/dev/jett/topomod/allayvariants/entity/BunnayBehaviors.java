@@ -490,7 +490,7 @@ final class BunnayBehaviors {
 			// It picks again when it gets there, or every so often; after a try that found no way it waits out the delay.
 			if (--this.repathDelay <= 0 || bunnay.getNavigation().isDone() && !this.lastTryFailed) {
 				this.repathDelay = BunnayEntity.FLEE_REPATH_TICKS;
-				Path path = bunnay.findFleePath(center);
+				Path path = bunnay.findFleePath(center, bunnay.getBrain().getMemory(BunnayAi.FLEE_AWAY).orElse(Vec3.ZERO));
 				this.lastTryFailed = path == null;
 				if (path != null) {
 					bunnay.getNavigation().moveTo(path, BunnayEntity.FLEE_SPEED);
@@ -501,6 +501,7 @@ final class BunnayBehaviors {
 		@Override
 		void end(ServerLevel level, BunnayEntity bunnay) {
 			bunnay.fleeing = false;
+			bunnay.resetFleeHeading();
 			bunnay.getNavigation().stop();
 		}
 	}
