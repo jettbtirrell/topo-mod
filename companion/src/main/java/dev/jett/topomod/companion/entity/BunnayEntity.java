@@ -44,6 +44,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.FollowOwnerGoal;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -209,6 +210,23 @@ public class BunnayEntity extends TamableAnimal {
 	private static final int FLEE_HOP_COOLDOWN_RANGE = 21;
 	/** While it flees it keeps this much of its sideways speed when it lands (an ordinary hop keeps 0.1), so it runs on. */
 	private static final double FLEE_LANDING_MOMENTUM = 0.5;
+
+	// Climbing steps. Walking up a run of one-block steps a mob jumps onto each one, and by default it must wait 10 ticks
+	// between jumps while the hop itself is over in 9, and in the air it has almost no sideways thrust, so it creeps onto the
+	// step. Two things speed that up. The wait is cut to STEP_JUMP_DELAY while it follows a path. And a jump up onto the next
+	// step of the path gets a push towards the middle of that step, worked out from how far away it is so it lands there and
+	// does not overshoot (STEP_HOP_REACH is the blocks covered per point of sideways speed over the 9 ticks the hop takes,
+	// from the same arithmetic as HOP_REACH).
+	private static final int STEP_JUMP_DELAY = 3;
+	private static final double STEP_HOP_REACH = 4.2;
+	private static final double STEP_HOP_MAX_SPEED = 0.3;
+	/** The next step of the path counts as a step up when it is at least this much higher, and at most this much. */
+	private static final double STEP_MIN_RISE = 0.5;
+	private static final double STEP_MAX_RISE = 1.6;
+	/** Only a step this close (sideways, in blocks) is given the push; further is not a step but a longer way to go. */
+	private static final double STEP_MAX_DISTANCE = 1.6;
+	/** LivingEntity's wait between jumps is private, so it is reached by reflection (null if that fails, and nothing changes). */
+	private static final java.lang.reflect.Field NO_JUMP_DELAY_FIELD = noJumpDelayField();
 
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
@@ -649,6 +667,10 @@ public class BunnayEntity extends TamableAnimal {
 	public void aiStep() {
 		super.aiStep();
 		if (!this.level().isClientSide()) {
+			if (this.getNavigation().isInProgress()) {
+				this.shortenJumpDelay(STEP_JUMP_DELAY);
+			}
+			this.debugHopRun.tick();
 			if (this.isScared() && this.getTarget() != null) {
 				this.setTarget(null);
 			}
@@ -662,6 +684,71 @@ public class BunnayEntity extends TamableAnimal {
 			this.setDancing(false);
 		}
 
+	}
+
+	private static java.lang.reflect.Field noJumpDelayField() {
+		try {
+			java.lang.reflect.Field field = LivingEntity.class.getDeclaredField("noJumpDelay");
+			field.setAccessible(true);
+			return field;
+		} catch (ReflectiveOperationException e) {
+			return null;
+		}
+	}
+
+	/** Cuts the wait before the next jump down to at most this many ticks. */
+	private void shortenJumpDelay(int ticks) {
+		if (NO_JUMP_DELAY_FIELD == null) {
+			return;
+		}
+		try {
+			if (NO_JUMP_DELAY_FIELD.getInt(this) > ticks) {
+				NO_JUMP_DELAY_FIELD.setInt(this, ticks);
+			}
+		} catch (IllegalAccessException ignored) {
+			// Cannot happen once setAccessible has worked.
+		}
+	}
+
+	/**
+	 * A jump up onto the next step of its path gets a push towards the middle of that step. The speed is the distance over
+	 * how far a unit of speed carries it in the hop, so it comes down on the step's middle and no further, whatever the
+	 * distance (and at most STEP_HOP_MAX_SPEED).
+	 */
+	@Override
+	public void jumpFromGround() {
+		super.jumpFromGround();
+		if (this.level().isClientSide() || !this.getNavigation().isInProgress()) {
+			return;
+		}
+		MoveControl move = this.getMoveControl();
+		double rise = move.getWantedY() - this.getY();
+		double dx = move.getWantedX() - this.getX();
+		double dz = move.getWantedZ() - this.getZ();
+		double distance = Math.hypot(dx, dz);
+		if (rise < STEP_MIN_RISE || rise > STEP_MAX_RISE || distance < 1.0E-3 || distance > STEP_MAX_DISTANCE) {
+			return;
+		}
+		double speed = Math.min(distance / STEP_HOP_REACH, STEP_HOP_MAX_SPEED);
+		Vec3 motion = this.getDeltaMovement();
+		this.setDeltaMovement(dx / distance * speed, motion.y, dz / distance * speed);
+		this.needsSync = true;
+	}
+
+	// DEBUG: a hop run that only TopoDebugCommand uses. Remove together with that command.
+	private final HopRun debugHopRun = new HopRun(this);
+
+	/** DEBUG: hops away from the given point, as a quick (flee) hop or a normal one. False if it cannot hop right now. */
+	public boolean debugHop(Vec3 awayFrom, boolean quick) {
+		if (!this.canHopNow() || this.debugHopRun.running) {
+			return false;
+		}
+		Hop plan = this.planAwayHop(awayFrom);
+		if (plan == null) {
+			return false;
+		}
+		this.debugHopRun.start(plan, quick);
+		return true;
 	}
 
 	/** The current hop is a quick one: it skips most of the crouch (see FLEE_HOP_TAKEOFF_TICK). */
@@ -945,9 +1032,9 @@ public class BunnayEntity extends TamableAnimal {
 		return stack.is(Items.CARROT) || stack.is(Items.GOLDEN_CARROT);
 	}
 
-	/** Health a carrot or golden carrot restores: a carrot 6 (3 hearts), a golden carrot 30 (15 hearts). */
+	/** Health a carrot or golden carrot restores: a carrot 6 (3 hearts), a golden carrot 12 (6 hearts): twice the food's nutrition, the same as a wolf. */
 	private static float healAmount(ItemStack food) {
-		return food.is(Items.GOLDEN_CARROT) ? 30.0F : 6.0F;
+		return food.is(Items.GOLDEN_CARROT) ? 12.0F : 6.0F;
 	}
 
 	// It can't breed with its own kind (see getBreedOffspring), so feeding it never puts it in love mode.
@@ -1285,21 +1372,27 @@ public class BunnayEntity extends TamableAnimal {
 		/** The tick it launches on and the tick the run ends on: a flee hop has almost no crouch, so both come sooner. */
 		private int takeoffTick = HOP_TAKEOFF_TICK;
 		private int totalTicks = HOP_TICKS;
+		/** Whether this is a quick hop (a flee hop): almost no crouch, and it keeps its momentum on landing. */
+		private boolean quick;
 
 		HopRun(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
 		}
 
 		void start(Hop hop) {
+			this.start(hop, this.bunnay.fleeing);
+		}
+
+		void start(Hop hop, boolean quick) {
+			this.quick = quick;
 			this.hop = hop;
 			this.ticks = 0;
 			this.landed = false;
 			this.running = true;
-			boolean quick = this.bunnay.fleeing;
-			this.takeoffTick = quick ? FLEE_HOP_TAKEOFF_TICK : HOP_TAKEOFF_TICK;
+			this.takeoffTick = this.quick ? FLEE_HOP_TAKEOFF_TICK : HOP_TAKEOFF_TICK;
 			this.totalTicks = HOP_TICKS - (HOP_TAKEOFF_TICK - this.takeoffTick);
 			this.bunnay.getNavigation().stop();
-			this.bunnay.entityData.set(DATA_QUICK_HOP, quick);
+			this.bunnay.entityData.set(DATA_QUICK_HOP, this.quick);
 			this.bunnay.entityData.set(DATA_HOPPING, true);
 		}
 
@@ -1328,7 +1421,7 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
 			} else if (!this.landed && this.ticks > this.takeoffTick + 2 && this.bunnay.onGround()) {
 				this.landed = true;
-				double keep = this.bunnay.fleeing ? FLEE_LANDING_MOMENTUM : 0.1;
+				double keep = this.quick ? FLEE_LANDING_MOMENTUM : 0.1;
 				this.bunnay.setDeltaMovement(this.bunnay.getDeltaMovement().multiply(keep, 1.0, keep));
 			}
 			if (this.ticks >= this.totalTicks) {
@@ -1342,9 +1435,8 @@ public class BunnayEntity extends TamableAnimal {
 			}
 			this.running = false;
 			this.bunnay.entityData.set(DATA_HOPPING, false);
-			boolean fleeing = this.bunnay.fleeing;
-			this.bunnay.hopCooldown = (fleeing ? FLEE_HOP_COOLDOWN_MIN : HOP_COOLDOWN_MIN)
-				+ this.bunnay.getRandom().nextInt(fleeing ? FLEE_HOP_COOLDOWN_RANGE : HOP_COOLDOWN_RANGE);
+			this.bunnay.hopCooldown = (this.quick ? FLEE_HOP_COOLDOWN_MIN : HOP_COOLDOWN_MIN)
+				+ this.bunnay.getRandom().nextInt(this.quick ? FLEE_HOP_COOLDOWN_RANGE : HOP_COOLDOWN_RANGE);
 		}
 	}
 
