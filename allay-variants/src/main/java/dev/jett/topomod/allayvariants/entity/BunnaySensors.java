@@ -83,9 +83,11 @@ final class BunnaySensors {
 			Brain<BunnayEntity> brain = bunnay.getBrain();
 			if (!bunnay.fleeReady()) {
 				brain.eraseMemory(BunnayAi.FLEE_THREAT_CENTER);
+				bunnay.debugThreats(List.of());
 				return;
 			}
 			List<Mob> threats = bunnay.findThreats();
+			bunnay.debugThreats(threats);
 			Vec3 sum = Vec3.ZERO;
 			double total = 0.0;
 			for (Mob mob : threats) {
