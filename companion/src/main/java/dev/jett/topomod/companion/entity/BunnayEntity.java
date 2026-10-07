@@ -192,7 +192,7 @@ public class BunnayEntity extends TamableAnimal {
 
 	// Fleeing at low health. A tamed bunnay at FLEE_BELOW_HEALTH or lower stops fighting and runs from the enemies instead: it
 	// takes no target at all (so its owner's fights, and whatever hurts it, do not pull it in), keeps away from the mobs that
-	// are after it (and only those: other hostile mobs are not its concern), and hops along its escape route at a much shorter hop cooldown. It runs
+	// are after it (and only those: other hostile mobs are not its concern), and hops along its escape route (on the usual hop cooldown). It runs
 	// at the speed a pet runs from fire. Once nothing is near it and it has had a quiet moment, it eats a carrot as usual,
 	// and when it is back above that health it fights again.
 	private static final float FLEE_BELOW_HEALTH = 20.0F;
@@ -206,9 +206,6 @@ public class BunnayEntity extends TamableAnimal {
 	/** Ticks between looks at what is around it, and between choosing a new place to run to. */
 	private static final int FLEE_SCAN_TICKS = 5;
 	private static final int FLEE_REPATH_TICKS = 10;
-	/** While it flees its hop cooldown is this many ticks: 20 to 40, a second or two, not the usual 5 to 7 seconds. */
-	private static final int FLEE_HOP_COOLDOWN_MIN = 20;
-	private static final int FLEE_HOP_COOLDOWN_RANGE = 21;
 
 	// Climbing steps. Walking up a run of one-block steps a mob jumps onto each one, and by default it must wait 10 ticks
 	// between jumps while the hop itself is over in 9, and in the air it has almost no sideways thrust, so it creeps onto the
@@ -1284,8 +1281,6 @@ public class BunnayEntity extends TamableAnimal {
 		@Override
 		public void start() {
 			this.bunnay.fleeing = true;
-			// A long wait left over from an ordinary hop does not hold up the escape.
-			this.bunnay.hopCooldown = Math.min(this.bunnay.hopCooldown, FLEE_HOP_COOLDOWN_MIN);
 			this.bunnay.stopEating();
 			this.bunnay.setTarget(null);
 			this.bunnay.getNavigation().stop();
@@ -1432,9 +1427,7 @@ public class BunnayEntity extends TamableAnimal {
 			this.running = false;
 			this.bunnay.setDiscardFriction(false);
 			this.bunnay.entityData.set(DATA_HOPPING, false);
-			boolean shortWait = this.bunnay.fleeing;
-			this.bunnay.hopCooldown = (shortWait ? FLEE_HOP_COOLDOWN_MIN : HOP_COOLDOWN_MIN)
-				+ this.bunnay.getRandom().nextInt(shortWait ? FLEE_HOP_COOLDOWN_RANGE : HOP_COOLDOWN_RANGE);
+			this.bunnay.hopCooldown = HOP_COOLDOWN_MIN + this.bunnay.getRandom().nextInt(HOP_COOLDOWN_RANGE);
 		}
 	}
 
