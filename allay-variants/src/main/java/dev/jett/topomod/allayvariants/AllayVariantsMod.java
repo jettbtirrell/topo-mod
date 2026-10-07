@@ -1,6 +1,7 @@
 package dev.jett.topomod.allayvariants;
 
 import dev.jett.topomod.allayvariants.command.BunnayDebugCommand;
+import dev.jett.topomod.allayvariants.entity.BunnayAi;
 import dev.jett.topomod.allayvariants.entity.BunnayBreeding;
 import dev.jett.topomod.allayvariants.registry.ModEntities;
 import dev.jett.topomod.allayvariants.registry.ModItems;
@@ -22,6 +23,7 @@ public class AllayVariantsMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		BunnayAi.register(); // before the entities: the Brain registers its memory and sensor types
 		ModEntities.register();
 		ModMenus.register();
 		ModSounds.register();

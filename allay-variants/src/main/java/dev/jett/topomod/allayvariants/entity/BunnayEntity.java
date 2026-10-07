@@ -44,19 +44,10 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.Brain;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.control.MoveControl;
-import net.minecraft.world.entity.ai.goal.FloatGoal;
-import net.minecraft.world.entity.ai.goal.FollowOwnerGoal;
-import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.ai.goal.SitWhenOrderedToGoal;
-import net.minecraft.world.entity.ai.goal.TemptGoal;
-import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
-import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
-import net.minecraft.world.entity.ai.goal.target.OwnerHurtByTargetGoal;
-import net.minecraft.world.entity.ai.goal.target.OwnerHurtTargetGoal;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -69,6 +60,7 @@ import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.pathfinder.Path;
+import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -96,8 +88,8 @@ import org.jspecify.annotations.Nullable;
 // Bunnay: a bunny-allay cross that can be tamed with carrots. It follows its owner and fights like a wolf; holding
 // weapons, sitting and an item screen will be built on this the way they were for the topo.
 public class BunnayEntity extends TamableAnimal {
-	private static final double WILD_HEALTH = 16.0;
-	private static final double TAME_HEALTH = 80.0;
+	static final double WILD_HEALTH = 16.0;
+	static final double TAME_HEALTH = 80.0;
 
 	// Hopping, like a frog's long jump. Whenever the hop is off cooldown, the bunnay looks for a place within reach to land
 	// that gets it where it is going at least HOP_MIN_DISTANCE closer than walking would, and if there is one it hops there
@@ -109,38 +101,40 @@ public class BunnayEntity extends TamableAnimal {
 	 * The most ticks a hop spends in the air. How long a hop actually takes depends on how fast the bunnay is moving (see
 	 * HOP_AIR_SPEED_FACTOR): the faster it runs, the sooner it is across.
 	 */
-	private static final int HOP_AIR_TICKS = 15;
+	static final int HOP_AIR_TICKS = 20;
 	/** The fewest ticks a hop spends in the air, however fast it is going. */
-	private static final int HOP_MIN_AIR_TICKS = 6;
+	static final int HOP_MIN_AIR_TICKS = 6;
 	/**
 	 * How its sideways speed in the air compares to its running speed (1.0 is the same, so a hop never slows it down: it is
 	 * as fast through the air as it was on the ground). Its running speed is its movement speed times the speed a goal asks
 	 * for (1.5 while fleeing), and a mob covers HOP_GROUND_SPEED_PER_SPEED blocks a tick for each point of it.
 	 */
-	private static final double HOP_AIR_SPEED_FACTOR = 1.0;
-	private static final double HOP_GROUND_SPEED_PER_SPEED = 2.158;
-	/** How far a hop can take it: 6 blocks along the ground (the frog's long jump is 4) and 2 up or down, the same as the frog's. */
-	private static final double HOP_MAX_DISTANCE = 6.0;
-	private static final int HOP_MAX_RISE = 2;
-	private static final int HOP_MAX_DROP = 2;
+	static final double HOP_AIR_SPEED_FACTOR = 1.0;
+	static final double HOP_GROUND_SPEED_PER_SPEED = 2.158;
+	/** Each block of climbing counts as this many extra blocks of distance when judging a hop (see effort). */
+	static final double CLIMB_COST = 2.0;
+	/** How far a hop can take it: 6 blocks along the ground (the frog's long jump is 4) , 3 up and 2 down (the frog manages 2 either way). */
+	static final double HOP_MAX_DISTANCE = 6.0;
+	static final int HOP_MAX_RISE = 3;
+	static final int HOP_MAX_DROP = 2;
 	/** A hop has to be at least this long (in blocks), and has to bring it at least this much closer to where it is going. */
-	private static final double HOP_MIN_DISTANCE = 2.0;
+	static final double HOP_MIN_DISTANCE = 2.0;
 	/** The wait after a hop, in ticks: 100 to 140, which is 5 to 7 seconds, the frog's. */
-	private static final int HOP_COOLDOWN_MIN = 100;
-	private static final int HOP_COOLDOWN_RANGE = 41;
+	static final int HOP_COOLDOWN_MIN = 100;
+	static final int HOP_COOLDOWN_RANGE = 41;
 	/** While the hop is off cooldown it looks for somewhere to hop this often, in ticks. */
-	private static final int HOP_SCAN_INTERVAL = 5;
+	static final int HOP_SCAN_INTERVAL = 5;
 	/** A hop that has not landed this many ticks after it should have is called off (it was stopped by something, say). */
-	private static final int HOP_LATE_TICKS = 10;
+	static final int HOP_LATE_TICKS = 10;
 	/** It works out the arc of this many of the best landing spots before giving up. */
-	private static final int HOP_MAX_TRIES = 12;
+	static final int HOP_MAX_TRIES = 12;
 	/**
 	 * What a mob does each tick while its friction is discarded (see Mob.setDiscardFriction, which the frog uses too), which the
 	 * arcs are worked out from: its sideways speed does not change, and its vertical speed just loses HOP_GRAVITY a tick (no
 	 * drag either), so the path is a plain parabola. It keeps this much of its sideways speed when it lands, so it runs on.
 	 */
-	private static final double HOP_GRAVITY = 0.08;
-	private static final double HOP_LANDING_MOMENTUM = 0.5;
+	static final double HOP_GRAVITY = 0.08;
+	static final double HOP_LANDING_MOMENTUM = 0.5;
 	/** After n ticks, the blocks covered per point of horizontal launch speed. */
 	private static final double[] HOP_REACH = new double[HOP_AIR_TICKS + 1];
 	/** After n ticks, the blocks risen per point of upward launch speed (that is, without gravity). */
@@ -162,52 +156,52 @@ public class BunnayEntity extends TamableAnimal {
 
 	// The idle animation is cosmetic and runs on the client only, on the same timer as the rabbit's: a new one every
 	// 180 to 219 ticks (9 to 11 seconds) while standing still.
-	private static final int IDLE_MIN_TICKS = 180;
-	private static final int IDLE_EXTRA_TICKS = 40;
+	static final int IDLE_MIN_TICKS = 180;
+	static final int IDLE_EXTRA_TICKS = 40;
 
 	// Fighting: it always swings its two hands in turn, an empty paw counting as a hand (the bunnay's own hit is 3). What it
 	// holds adds damage to the hits of the hand that holds it: a bamboo, a breeze rod or a blaze rod +2, or a stick
 	// +1. A breeze rod also blasts the foe the way a wind charge would; a blaze rod also does what a blaze's small
 	// fireball does to whatever it hits (holding one does not protect the bunnay from fire in any way). All of them swing
 	// at the same pace.
-	private static final double ROD_BONUS_DAMAGE = 2.0;
-	private static final double BAMBOO_BONUS_DAMAGE = 2.0;
-	private static final double STICK_BONUS_DAMAGE = 1.0;
+	static final double ROD_BONUS_DAMAGE = 2.0;
+	static final double BAMBOO_BONUS_DAMAGE = 2.0;
+	static final double STICK_BONUS_DAMAGE = 1.0;
 	/**
 	 * How long a hit with a blaze rod sets a foe on fire, in seconds: the same 5 a small fireball does (SmallFireball also
 	 * does 5 damage, which is left out here, and only places fire when it hits a block, not an entity, so no fire is placed).
 	 */
-	private static final float BLAZE_ROD_FIRE_SECONDS = 5.0F;
+	static final float BLAZE_ROD_FIRE_SECONDS = 5.0F;
 	private static final Identifier WEAPON_DAMAGE_ID = AllayVariantsMod.id("weapon_damage");
 	/** The wind burst's shove on a foe: this fast away from the bunnay, and this fast straight up (0.9 is about 4 blocks of height). */
-	private static final double WIND_BURST_HORIZONTAL = 0.5;
-	private static final double WIND_BURST_VERTICAL = 0.9;
+	static final double WIND_BURST_HORIZONTAL = 0.5;
+	static final double WIND_BURST_VERTICAL = 0.9;
 	/**
 	 * How fast it swings: it may swing this many ticks before the usual 20 tick wait between swings is up, so 4 means a swing
 	 * every 16 ticks instead of 20, 25% faster. The wait is shared by both hands (it swings them in turn), and it is the
 	 * same whatever they hold. It is higher than a plain mob's because the bunnay is always swinging two hands.
 	 */
-	private static final int ATTACK_HEAD_START_TICKS = 4;
+	static final int ATTACK_HEAD_START_TICKS = 4;
 	/** How fast the ready stance eases in and out, per tick (it takes 4 ticks to raise and about 7 to lower). */
-	private static final float READY_RISE = 0.25F;
-	private static final float READY_FALL = 0.15F;
+	static final float READY_RISE = 0.25F;
+	static final float READY_FALL = 0.15F;
 
 	// Fleeing at low health. A tamed bunnay at FLEE_BELOW_HEALTH or lower stops fighting and runs from the enemies instead: it
 	// takes no target at all (so its owner's fights, and whatever hurts it, do not pull it in), keeps away from the mobs that
 	// are after it (and only those: other hostile mobs are not its concern), and hops along its escape route (on the usual hop cooldown). It runs
 	// at the speed a pet runs from fire. Once nothing is near it and it has had a quiet moment, it eats a carrot as usual,
 	// and when it is back above that health it fights again.
-	private static final float FLEE_BELOW_HEALTH = 20.0F;
+	static final float FLEE_BELOW_HEALTH = 20.0F;
 	/** The speed it runs at, the same as a wolf's or cat's panic goal (what a pet does when it is on fire). A rabbit's 2.2 is for an animal that only moves while it hops, so it is far too fast for one that runs. */
-	private static final double FLEE_SPEED = 1.5;
+	static final double FLEE_SPEED = 1.5;
 	/** It looks this far (in blocks) for mobs that are after it. */
-	private static final double FLEE_SEARCH_RADIUS = 34.0;
+	static final double FLEE_SEARCH_RADIUS = 34.0;
 	/** How far it picks a place to run to: horizontally and vertically, in blocks. */
-	private static final int FLEE_AWAY_RANGE = 14;
-	private static final int FLEE_AWAY_VERTICAL = 7;
+	static final int FLEE_AWAY_RANGE = 14;
+	static final int FLEE_AWAY_VERTICAL = 7;
 	/** Ticks between looks at what is around it, and between choosing a new place to run to. */
-	private static final int FLEE_SCAN_TICKS = 5;
-	private static final int FLEE_REPATH_TICKS = 10;
+	static final int FLEE_SCAN_TICKS = 5;
+	static final int FLEE_REPATH_TICKS = 10;
 
 	// Climbing steps. Walking up a run of one-block steps a mob jumps onto each one, and by default it must wait 10 ticks
 	// between jumps while the hop itself is over in 9, and in the air it has almost no sideways thrust, so it creeps onto the
@@ -215,14 +209,14 @@ public class BunnayEntity extends TamableAnimal {
 	// step of the path gets a push towards the middle of that step, worked out from how far away it is so it lands there and
 	// does not overshoot (STEP_HOP_REACH is the blocks covered per point of sideways speed over the 9 ticks the hop takes,
 	// from the same arithmetic as HOP_REACH).
-	private static final int STEP_JUMP_DELAY = 3;
-	private static final double STEP_HOP_REACH = 4.2;
-	private static final double STEP_HOP_MAX_SPEED = 0.3;
+	static final int STEP_JUMP_DELAY = 3;
+	static final double STEP_HOP_REACH = 4.2;
+	static final double STEP_HOP_MAX_SPEED = 0.3;
 	/** The next step of the path counts as a step up when it is at least this much higher, and at most this much. */
-	private static final double STEP_MIN_RISE = 0.5;
-	private static final double STEP_MAX_RISE = 1.6;
+	static final double STEP_MIN_RISE = 0.5;
+	static final double STEP_MAX_RISE = 1.6;
 	/** Only a step this close (sideways, in blocks) is given the push; further is not a step but a longer way to go. */
-	private static final double STEP_MAX_DISTANCE = 1.6;
+	static final double STEP_MAX_DISTANCE = 1.6;
 	/** LivingEntity's wait between jumps is private, so it is reached by reflection (null if that fails, and nothing changes). */
 	private static final java.lang.reflect.Field NO_JUMP_DELAY_FIELD = noJumpDelayField();
 
@@ -233,57 +227,57 @@ public class BunnayEntity extends TamableAnimal {
 	// slot is full or there is nothing left to harvest. Another note from the same block starts the 30 seconds again; a different
 	// note block is ignored until it has forgotten the first. It does not follow its owner while it is tuned in. Wool between the
 	// note block and the bunnay muffles the note, as it does for an allay. Sitting makes it forget at once.
-	private static final int FARM_HEARING_RADIUS = 16;
-	private static final int FARM_FORGET_TICKS = 600;
+	static final int FARM_HEARING_RADIUS = 16;
+	static final int FARM_FORGET_TICKS = 600;
 	/** It is pulled back when it is further than this from the note block (in blocks), until it is within FARM_CLOSE_ENOUGH. */
-	private static final double FARM_LEASH = 16.0;
-	private static final double FARM_CLOSE_ENOUGH = 4.0;
+	static final double FARM_LEASH = 16.0;
+	static final double FARM_CLOSE_ENOUGH = 4.0;
 	/** It tosses the carrots when it is this close to the note block. */
-	private static final double FARM_DELIVER_DISTANCE = 3.0;
+	static final double FARM_DELIVER_DISTANCE = 3.0;
 	/** It keeps this many carrots for itself when it delivers, so it can still heal. */
-	private static final int FARM_KEEP_CARROTS = 1;
+	static final int FARM_KEEP_CARROTS = 1;
 	/** The wait after a delivery before the next, and how long it tries to reach the note block, in ticks. */
-	private static final int FARM_DELIVER_COOLDOWN = 100;
-	private static final int FARM_DELIVER_GIVE_UP_TICKS = 400;
+	static final int FARM_DELIVER_COOLDOWN = 100;
+	static final int FARM_DELIVER_GIVE_UP_TICKS = 400;
 
 	// Picking up carrots lying about. As something to do when it has nothing better, a tamed bunnay with room in its food slot
 	// goes to carrots on the ground nearby and picks them up, whoever dropped them (but not ones a bunnay tossed: its own gifts and
 	// deliveries). It stays within reach of its owner, or of the note block it is tuned in to.
-	private static final int PICK_UP_RADIUS = 8;
-	private static final int PICK_UP_HEIGHT = 3;
-	private static final int PICK_UP_GIVE_UP_TICKS = 200;
+	static final int PICK_UP_RADIUS = 8;
+	static final int PICK_UP_HEIGHT = 3;
+	static final int PICK_UP_GIVE_UP_TICKS = 200;
 
 	// Harvesting carrots. Whenever it can carry more (its food slot is empty or holds ordinary carrots with room, not golden
 	// carrots), a tamed bunnay out of a fight goes to fully grown carrots it can see, breaks them, and puts what they drop
 	// straight into its food slot. It only does this where mobs are allowed to grief, and never strays far from its owner.
 	/** How far it looks for carrots, sideways and up or down, in blocks. */
-	private static final int HARVEST_SEARCH_RADIUS = 10;
-	private static final int HARVEST_SEARCH_HEIGHT = 2;
+	static final int HARVEST_SEARCH_RADIUS = 10;
+	static final int HARVEST_SEARCH_HEIGHT = 2;
 	/** It only works carrots this close to its owner, so harvesting does not lead it off. */
-	private static final double HARVEST_OWNER_RANGE = 16.0;
+	static final double HARVEST_OWNER_RANGE = 16.0;
 	/** It breaks the carrots this long after it gets there (it swings at them first), in ticks. */
-	private static final int HARVEST_WORK_TICKS = 8;
+	static final int HARVEST_WORK_TICKS = 8;
 	/** The whole job (walk over, break, pick up, wait, plant) is abandoned after this long, in ticks (20 seconds). */
-	private static final int HARVEST_GIVE_UP_TICKS = 400;
+	static final int HARVEST_GIVE_UP_TICKS = 400;
 	/** It stops trying to reach the dropped carrots after this long (5 seconds), and goes on to planting. */
-	private static final int HARVEST_PICK_UP_TICKS = 100;
+	static final int HARVEST_PICK_UP_TICKS = 100;
 	/** After picking up (or giving up on) the drops it waits this long (1 second) before planting. */
-	private static final int HARVEST_REPLANT_DELAY_TICKS = 20;
+	static final int HARVEST_REPLANT_DELAY_TICKS = 20;
 
 	// Eating the carrots in its off hand to heal.
 	/** How long one carrot takes to eat, in ticks (the same as a player's). */
-	private static final int EAT_TICKS = 32;
+	static final int EAT_TICKS = 32;
 	/** It starts eating when it is missing at least this much health (1 heart), so a golden carrot is not wasted on a scratch... */
-	private static final float EAT_MIN_MISSING_HEALTH = 2.0F;
+	static final float EAT_MIN_MISSING_HEALTH = 2.0F;
 	/** ...but once it has started it keeps going, carrot after carrot, until it is missing less than this (about healed). */
-	private static final float EAT_KEEP_GOING_MISSING_HEALTH = 0.5F;
+	static final float EAT_KEEP_GOING_MISSING_HEALTH = 0.5F;
 	/** Pause after finishing (or being interrupted) before it starts on the next carrot. */
-	private static final int EAT_COOLDOWN_TICKS = 40;
+	static final int EAT_COOLDOWN_TICKS = 40;
 	/** It will not eat until this many ticks have passed since it was last hurt by a mob, so it is out of the fight (5 seconds). */
-	private static final int EAT_SAFE_TICKS = 100;
+	static final int EAT_SAFE_TICKS = 100;
 	/** How fast the eating pose eases in and out, per tick. */
-	private static final float EAT_RISE = 0.2F;
-	private static final float EAT_FALL = 0.15F;
+	static final float EAT_RISE = 0.2F;
+	static final float EAT_FALL = 0.15F;
 
 	/** Synced so the client can show the eating pose... */
 	private static final EntityDataAccessor<Boolean> DATA_EATING = SynchedEntityData.defineId(BunnayEntity.class, EntityDataSerializers.BOOLEAN);
@@ -307,31 +301,30 @@ public class BunnayEntity extends TamableAnimal {
 	/** 0 to 1, client side: how far into the eating pose it is. */
 	private float eatProgress;
 	private float eatProgressO;
-	/** Server side: ticks into the carrot being eaten, and the wait before the next one. */
+	/** Server side: ticks into the carrot being eaten. */
 	private int eatTicks;
-	private int eatCooldown;
 	/**
 	 * The carrots it eats. They are not in a hand (both hands hold weapons); it takes one out to eat, which is shown by
 	 * swapping the carrot into its left hand for the meal, like a player switching to food and back.
 	 */
-	private final SimpleContainer food = new SimpleContainer(1);
+	final SimpleContainer food = new SimpleContainer(1);
 
 	// Giving carrots to a hungry owner, the way an allay hands items to the player it likes: when its owner is hungry and in
 	// sight it walks over and tosses some of the carrots from its food slot to them. It keeps GIFT_KEEP_CARROTS for itself,
 	// so it can still heal, and waits a long while before it does it again.
 	/** The owner is hungry at or below this food level: the point where they can no longer sprint (three drumsticks). */
-	private static final int GIFT_HUNGRY_AT = 6;
-	private static final int GIFT_MAX_CARROTS = 5;
-	private static final int GIFT_KEEP_CARROTS = 1;
+	static final int GIFT_HUNGRY_AT = 6;
+	static final int GIFT_MAX_CARROTS = 5;
+	static final int GIFT_KEEP_CARROTS = 1;
 	/** The wait after a gift, in ticks (10 minutes). */
-	private static final int GIFT_COOLDOWN_TICKS = 12000;
+	static final int GIFT_COOLDOWN_TICKS = 12000;
 	/** How close its owner has to be, in blocks, for it to notice they are hungry, and how close it gets to give. */
-	private static final double GIFT_NOTICE_RANGE = 12.0;
-	private static final double GIFT_REACH = 2.5;
+	static final double GIFT_NOTICE_RANGE = 12.0;
+	static final double GIFT_REACH = 2.5;
 	/** It gives up reaching its owner after this many ticks, and tries again after GIFT_RETRY_TICKS. */
-	private static final int GIFT_GIVE_UP_TICKS = 200;
-	private static final int GIFT_RETRY_TICKS = 200;
-	private int giftCooldown;
+	static final int GIFT_GIVE_UP_TICKS = 200;
+	static final int GIFT_RETRY_TICKS = 200;
+	int giftCooldown;
 
 	/** The hand it attacked with last. With a weapon in each hand it swings them in turn. */
 	private InteractionHand attackHand = InteractionHand.MAIN_HAND;
@@ -340,18 +333,12 @@ public class BunnayEntity extends TamableAnimal {
 	// is playing, and stops dancing when the music stops or the jukebox is gone or too far away.
 	private final DynamicGameEventListener<JukeboxListener> dynamicJukeboxListener;
 	private @Nullable BlockPos jukeboxPos;
-	/** The note block it is tuned in to (see FARM_FORGET_TICKS), and the ticks left before it forgets it. */
+	/** Listens for the note blocks that tune it in (see FARM_FORGET_TICKS); the one it is tuned in to is a Brain memory. */
 	private final DynamicGameEventListener<NoteBlockListener> dynamicNoteBlockListener;
-	private @Nullable BlockPos farmPos;
-	private int farmTicks;
-	/** Set by the harvest goal each time it looks: there was no ripe carrot for it to go to. Used to decide when to deliver. */
-	private boolean noCropsFound;
-	private int deliverCooldown;
-	private int hopCooldown;
-	/** Whether its follow-the-owner goal is running, which is when it hops towards its owner even if it cannot walk there. */
-	private boolean following;
-	/** Whether its flee goal is running (see FLEE_BELOW_HEALTH). */
-	private boolean fleeing;
+	/** Whether it is following its owner, which is when it hops towards them even if it cannot walk there. */
+	boolean following;
+	/** Whether it is fleeing (see FLEE_BELOW_HEALTH). */
+	boolean fleeing;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
 		super(type, level);
@@ -429,7 +416,7 @@ public class BunnayEntity extends TamableAnimal {
 	 * Once it is already eating, how hurt it has to be is lower (see EAT_KEEP_GOING_MISSING_HEALTH), so it finishes the job,
 	 * and being hurt no longer matters (only a new target, which means a fight has found it, stops it).
 	 */
-	private boolean canEat(boolean alreadyEating) {
+	boolean canEat(boolean alreadyEating) {
 		LivingEntity target = this.getTarget();
 		// Starting needs it to be out of the fight, but once it is eating, damage does not stop it: a bunnay hit by something
 		// that keeps hurting it (a wither effect, poison, fire) would otherwise never get to finish a carrot.
@@ -447,13 +434,13 @@ public class BunnayEntity extends TamableAnimal {
 
 	/** Whether another ordinary carrot would fit in the food slot (it is empty, or holds carrots with room; golden ones do not mix). */
 	/** How many carrots it would give right now: up to GIFT_MAX_CARROTS of the ordinary ones in its food slot, keeping GIFT_KEEP_CARROTS. */
-	private int carrotsToGive() {
+	int carrotsToGive() {
 		ItemStack held = this.food.getItem(0);
 		return held.is(Items.CARROT) ? Math.max(0, Math.min(GIFT_MAX_CARROTS, held.getCount() - GIFT_KEEP_CARROTS)) : 0;
 	}
 
 	/** Its owner, if they are hungry, close and in sight, so that it notices. */
-	private @Nullable ServerPlayer hungryOwner() {
+	@Nullable ServerPlayer hungryOwner() {
 		if (!(this.getOwner() instanceof ServerPlayer owner) || !owner.isAlive() || owner.isSpectator() || owner.level() != this.level()) {
 			return null;
 		}
@@ -461,13 +448,13 @@ public class BunnayEntity extends TamableAnimal {
 		return hungry && this.distanceToSqr(owner) <= GIFT_NOTICE_RANGE * GIFT_NOTICE_RANGE && this.hasLineOfSight(owner) ? owner : null;
 	}
 
-	private boolean canTakeCarrots() {
+	boolean canTakeCarrots() {
 		ItemStack held = this.food.getItem(0);
 		return held.isEmpty() || (held.is(Items.CARROT) && held.getCount() < held.getMaxStackSize());
 	}
 
 	/** Low on health, and tame: it runs from fights instead of taking part in them (see FLEE_BELOW_HEALTH). */
-	private boolean isScared() {
+	boolean isScared() {
 		return this.isTame() && this.getHealth() <= FLEE_BELOW_HEALTH;
 	}
 
@@ -478,10 +465,188 @@ public class BunnayEntity extends TamableAnimal {
 			return;
 		}
 		super.setTarget(target);
+		LivingEntity valid = super.getTarget();
+		if (valid == null) {
+			this.getBrain().eraseMemory(MemoryModuleType.ATTACK_TARGET);
+		} else {
+			this.getBrain().setMemory(MemoryModuleType.ATTACK_TARGET, valid);
+		}
+	}
+
+	// The target lives in the Brain's attack target memory, as for the other Brain mobs.
+	@Override
+	public @Nullable LivingEntity getTarget() {
+		return this.getTargetFromBrain();
+	}
+
+	// ---- the Brain (see BunnayAi) ----
+
+	@Override
+	protected Brain<BunnayEntity> makeBrain(Brain.Packed packed) {
+		return BunnayAi.makeBrain(this, packed);
+	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public Brain<BunnayEntity> getBrain() {
+		return (Brain<BunnayEntity>) super.getBrain();
+	}
+
+	@Override
+	protected void customServerAiStep(ServerLevel level) {
+		this.getBrain().tick(level, this);
+		BunnayAi.updateActivity(this);
+		super.customServerAiStep(level);
+	}
+
+	/** Ordered to sit, and able to: the sit goal's own conditions (it stays sitting once it has started). */
+	boolean wantsToSitNow() {
+		if (!this.isOrderedToSit() || !this.isTame()) {
+			return false;
+		}
+		if (this.isInSittingPose()) {
+			return true;
+		}
+		if (this.isInWater() || !this.onGround()) {
+			return false;
+		}
+		LivingEntity owner = this.getOwner();
+		return owner == null || owner.level() != this.level() || !(this.distanceToSqr(owner) < 144.0 && owner.getLastHurtByMob() != null);
+	}
+
+	boolean hasLiveTarget() {
+		LivingEntity target = this.getTarget();
+		return target != null && target.isAlive();
+	}
+
+	/** Scared, and free to run: not sitting, riding or a baby. */
+	boolean fleeReady() {
+		return this.isScared() && !this.isOrderedToSit() && !this.isPassenger() && !this.isBaby();
+	}
+
+	/** Starts the wait before the next hop. */
+	void startHopCooldown() {
+		this.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, HOP_COOLDOWN_MIN + this.getRandom().nextInt(HOP_COOLDOWN_RANGE));
+	}
+
+	/** Calm and free to work: tame, not busy with anything else, and not in a fight. */
+	boolean freeToHarvest() {
+		return this.isTame() && !this.isBaby() && !this.isOrderedToSit() && !this.isDancing() && !this.isEating() && !this.isHopping()
+			&& !this.isPassenger() && !this.hasLiveTarget();
+	}
+
+	/** Able to start on a new carrot: free to work, with room for carrots, and mobs may grief. */
+	boolean canStartHarvest() {
+		return this.level() instanceof ServerLevel level && this.freeToHarvest() && this.canTakeCarrots() && level.getGameRules().get(GameRules.MOB_GRIEFING);
+	}
+
+	boolean canPickUpGroundCarrots() {
+		return this.level() instanceof ServerLevel level && this.freeForFarmWork() && this.canTakeCarrots() && level.getGameRules().get(GameRules.MOB_GRIEFING);
+	}
+
+	boolean isRipeCarrot(BlockPos pos) {
+		BlockState state = this.level().getBlockState(pos);
+		return state.getBlock() instanceof CarrotBlock carrots && carrots.isMaxAge(state);
+	}
+
+	/** A carrot on the ground it would pick up: not one a bunnay tossed (its own gifts and deliveries), within reach of the note block or its owner. */
+	boolean isWantedGroundItem(ItemEntity candidate) {
+		ItemStack stack = candidate.getItem();
+		if (candidate.isRemoved() || candidate.hasPickUpDelay() || !isCarrot(stack) || !this.food.canAddItem(stack) || candidate.getOwner() instanceof BunnayEntity) {
+			return false;
+		}
+		BlockPos farm = this.getFarmPos();
+		LivingEntity owner = this.getOwner();
+		if (farm != null) {
+			return farm.distToCenterSqr(candidate.position()) <= FARM_LEASH * FARM_LEASH;
+		}
+		return owner == null || owner.distanceToSqr(candidate) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
+	}
+
+	/** The nearest wanted carrot on the ground (of the five nearest) that it has a path to. */
+	@Nullable ItemEntity findGroundCarrot() {
+		List<ItemEntity> found = this.level().getEntitiesOfClass(ItemEntity.class,
+			this.getBoundingBox().inflate(PICK_UP_RADIUS, PICK_UP_HEIGHT, PICK_UP_RADIUS), this::isWantedGroundItem);
+		found.sort(Comparator.comparingDouble(this::distanceToSqr));
+		for (ItemEntity candidate : found.stream().limit(5).toList()) {
+			if (this.getNavigation().createPath(candidate, 1) != null) {
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	/** The nearest ripe carrot (close enough to the note block or its owner) that it has a path to, or null. */
+	@Nullable BlockPos findRipeCarrot() {
+		LivingEntity owner = this.getOwner();
+		BlockPos farm = this.getFarmPos();
+		BlockPos origin = this.blockPosition();
+		List<BlockPos> ripe = new ArrayList<>();
+		for (BlockPos pos : BlockPos.betweenClosed(
+			origin.offset(-HARVEST_SEARCH_RADIUS, -HARVEST_SEARCH_HEIGHT, -HARVEST_SEARCH_RADIUS),
+			origin.offset(HARVEST_SEARCH_RADIUS, HARVEST_SEARCH_HEIGHT, HARVEST_SEARCH_RADIUS))) {
+			boolean near = farm != null
+				? farm.distToCenterSqr(Vec3.atCenterOf(pos)) <= FARM_LEASH * FARM_LEASH
+				: owner == null || owner.distanceToSqr(Vec3.atCenterOf(pos)) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
+			if (this.isRipeCarrot(pos) && near) {
+				ripe.add(pos.immutable());
+			}
+		}
+		ripe.sort(Comparator.comparingDouble(pos -> this.distanceToSqr(Vec3.atCenterOf(pos))));
+		for (BlockPos pos : ripe.stream().limit(5).toList()) {
+			if (this.getNavigation().createPath(pos, 1) != null) {
+				return pos;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * A path to somewhere away from the threats. First the usual pick: a random spot on land in the half-circle facing away that
+	 * it can walk to. If there is none (in a lake, say, where no spot within reach is dry), it heads straight away from them,
+	 * swimming if it has to. Null if even that has no way.
+	 */
+	@Nullable Path findFleePath(Vec3 threatCenter) {
+		double now = this.position().distanceTo(threatCenter);
+		for (int attempt = 0; attempt < 6; attempt++) {
+			Vec3 spot = DefaultRandomPos.getPosAway(this, FLEE_AWAY_RANGE, FLEE_AWAY_VERTICAL, threatCenter);
+			if (spot == null || spot.distanceTo(threatCenter) <= now) {
+				continue;
+			}
+			Path path = this.getNavigation().createPath(spot.x, spot.y, spot.z, 0);
+			if (path != null && path.canReach()) {
+				return path;
+			}
+		}
+		Vec3 away = this.position().subtract(threatCenter).multiply(1.0, 0.0, 1.0);
+		if (away.lengthSqr() < 1.0E-4) {
+			away = this.getViewVector(1.0F).multiply(1.0, 0.0, 1.0);
+		}
+		away = away.normalize();
+		for (double distance : new double[] {12.0, 8.0, 5.0}) {
+			Vec3 spot = this.position().add(away.scale(distance));
+			Path path = this.getNavigation().createPath(spot.x, spot.y, spot.z, 0);
+			if (path != null && path.canReach()) {
+				return path;
+			}
+		}
+		return null;
+	}
+
+	private float fleeSavedWaterMalus;
+
+	/** Fleeing, it swims as readily as it walks (the same as when it follows its owner), and puts that back afterwards. */
+	void setFleeSwimming(boolean on) {
+		if (on) {
+			this.fleeSavedWaterMalus = this.getPathfindingMalus(PathType.WATER);
+			this.setPathfindingMalus(PathType.WATER, 0.0F);
+		} else {
+			this.setPathfindingMalus(PathType.WATER, this.fleeSavedWaterMalus);
+		}
 	}
 
 	/** Mobs it runs from: whatever is after it (has it as its target), and nothing else. */
-	private List<Mob> findThreats() {
+	List<Mob> findThreats() {
 		return this.level().getEntitiesOfClass(
 			Mob.class,
 			this.getBoundingBox().inflate(FLEE_SEARCH_RADIUS),
@@ -489,63 +654,70 @@ public class BunnayEntity extends TamableAnimal {
 		);
 	}
 
-	/** A hop that gets it further from a point (its threats), used when there is no route to run along. */
-	private @Nullable Hop planAwayHop(Vec3 threatCenter) {
-		double now = this.position().distanceTo(threatCenter);
+	/**
+	 * How hard it is to get from one place to another: the distance, plus CLIMB_COST blocks for each block that has to be
+	 * climbed (dropping is free). Hops are judged by it everywhere: how much closer a landing is to where it is going, or (when
+	 * running from something) how much further the threat is from the landing.
+	 */
+	static double effort(Vec3 from, Vec3 to) {
+		return from.distanceTo(to) + CLIMB_COST * Math.max(0.0, to.y - from.y);
+	}
+
+	/** A hop that makes it harder for a point (its threats) to reach it, used when there is no route to run along. */
+	@Nullable Hop planAwayHop(Vec3 threatCenter) {
+		double now = effort(threatCenter, this.position());
 		return this.planHop(landing -> {
-			double away = landing.distanceTo(threatCenter);
+			double away = effort(threatCenter, landing);
 			return away < now + HOP_MIN_DISTANCE ? Double.MAX_VALUE : -away;
 		}, Double.MAX_VALUE / 2.0);
 	}
 
-	/** Starts, plays and finishes eating the carrot in its off hand. The server decides; the client just shows the pose. */
-	private void tickEating() {
+	void beginEating(ItemStack stack) {
+		this.eatTicks = 0;
+		this.entityData.set(DATA_EATING_FOOD, stack.copyWithCount(1));
+		this.entityData.set(DATA_EATING, true);
+	}
+
+	/** One tick of a meal in progress; it ends (stopEating) when it cannot go on or the carrots are used up or it is healed. */
+	void continueEating() {
 		ItemStack stack = this.food.getItem(0);
-		if (this.isEating()) {
-			if (!this.canEat(true) || !isCarrot(stack)) {
+		if (!this.canEat(true) || !isCarrot(stack)) {
+			this.stopEating();
+			return;
+		}
+		this.eatTicks++;
+		// It stands still to eat (a sitting bunnay already is).
+		if (!this.isInSittingPose()) {
+			this.getNavigation().stop();
+		}
+		if (this.eatTicks % 4 == 0 && this.eatTicks < EAT_TICKS) {
+			this.eatEffects(stack, 3);
+		}
+		if (this.eatTicks >= EAT_TICKS) {
+			this.heal(healAmount(stack));
+			ItemStack eaten = stack.copyWithCount(1);
+			stack.shrink(1);
+			if (stack.isEmpty()) {
+				this.food.setItem(0, ItemStack.EMPTY);
+			}
+			this.food.setChanged();
+			this.eatEffects(eaten, 8);
+			// Straight on to the next one, with the carrot still in its hand, until it is healed or out of carrots.
+			ItemStack next = this.food.getItem(0);
+			if (isCarrot(next) && this.canEat(true)) {
+				this.eatTicks = 0;
+				this.entityData.set(DATA_EATING_FOOD, next.copyWithCount(1));
+			} else {
 				this.stopEating();
-				return;
 			}
-			this.eatTicks++;
-			// It stands still to eat (a sitting bunnay already is).
-			if (!this.isInSittingPose()) {
-				this.getNavigation().stop();
-			}
-			if (this.eatTicks % 4 == 0 && this.eatTicks < EAT_TICKS) {
-				this.eatEffects(stack, 3);
-			}
-			if (this.eatTicks >= EAT_TICKS) {
-				this.heal(healAmount(stack));
-				ItemStack eaten = stack.copyWithCount(1);
-				stack.shrink(1);
-				if (stack.isEmpty()) {
-					this.food.setItem(0, ItemStack.EMPTY);
-				}
-				this.food.setChanged();
-				this.eatEffects(eaten, 8);
-				// Straight on to the next one, with the carrot still in its hand, until it is healed or out of carrots.
-				ItemStack next = this.food.getItem(0);
-				if (isCarrot(next) && this.canEat(true)) {
-					this.eatTicks = 0;
-					this.entityData.set(DATA_EATING_FOOD, next.copyWithCount(1));
-				} else {
-					this.stopEating();
-				}
-			}
-		} else if (this.eatCooldown > 0) {
-			this.eatCooldown--;
-		} else if (isCarrot(stack) && this.canEat(false)) {
-			this.eatTicks = 0;
-			this.entityData.set(DATA_EATING_FOOD, stack.copyWithCount(1));
-			this.entityData.set(DATA_EATING, true);
 		}
 	}
 
-	private void stopEating() {
+	void stopEating() {
 		this.entityData.set(DATA_EATING, false);
 		this.entityData.set(DATA_EATING_FOOD, ItemStack.EMPTY);
 		this.eatTicks = 0;
-		this.eatCooldown = EAT_COOLDOWN_TICKS;
+		this.getBrain().setMemoryWithExpiry(BunnayAi.EAT_COOLDOWN, true, EAT_COOLDOWN_TICKS);
 	}
 
 	/** The crunch and a few crumbs of the food, in front of its mouth. */
@@ -571,7 +743,7 @@ public class BunnayEntity extends TamableAnimal {
 		return this.attackHand == InteractionHand.MAIN_HAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
 	}
 
-	// The melee goal swings the main hand; this swaps in the hand it should be, so the swing shows on that arm and
+	// The melee behaviour swings the main hand; this swaps in the hand it should be, so the swing shows on that arm and
 	// doHurtTarget (which follows straight after) uses that hand's weapon.
 	@Override
 	public void swingForAttack(InteractionHand hand) {
@@ -697,6 +869,14 @@ public class BunnayEntity extends TamableAnimal {
 			|| !this.level().getBlockState(this.jukeboxPos).is(Blocks.JUKEBOX);
 	}
 
+	// A hop flies on the speed it was launched with and nothing else. Without this the walking input left over from running (the
+	// move control sets it as the hop starts) is added on the launch tick, on the ground where it counts for the most, and again
+	// in the air with no friction to take it off, so a hop made while running lands well past where it was aimed.
+	@Override
+	public void travel(Vec3 input) {
+		super.travel(this.isHopping() ? Vec3.ZERO : input);
+	}
+
 	@Override
 	public void aiStep() {
 		super.aiStep();
@@ -708,12 +888,8 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.isScared() && this.getTarget() != null) {
 				this.setTarget(null);
 			}
-			this.tickEating();
 			if (this.giftCooldown > 0) {
 				this.giftCooldown--;
-			}
-			if (this.deliverCooldown > 0) {
-				this.deliverCooldown--;
 			}
 			this.tickFarm();
 		}
@@ -726,24 +902,32 @@ public class BunnayEntity extends TamableAnimal {
 
 	/** Whether it is tuned in to a note block, so it works the farm and does not follow its owner. */
 	public boolean isFarming() {
-		return this.farmPos != null;
+		return this.getFarmPos() != null;
 	}
 
-	/** Counts down the time to forget the note block, and forgets it if it has gone or the bunnay has been told to sit. */
+	/** The note block it is tuned in to: the vanilla "liked note block" memory, which forgets itself after FARM_FORGET_TICKS. */
+	@Nullable BlockPos getFarmPos() {
+		return this.getBrain().getMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION).map(GlobalPos::pos).orElse(null);
+	}
+
+	boolean isNoCropsFound() {
+		return this.getBrain().hasMemoryValue(BunnayAi.NO_CROPS_FOUND);
+	}
+
+	/** Forgets the note block if it has gone or the bunnay has been told to sit. */
 	private void tickFarm() {
-		if (this.farmPos == null) {
+		BlockPos farm = this.getFarmPos();
+		if (farm == null) {
 			return;
 		}
-		if (--this.farmTicks <= 0 || this.isOrderedToSit()
-			|| (this.tickCount % 20 == 0 && !this.level().getBlockState(this.farmPos).is(Blocks.NOTE_BLOCK))) {
+		if (this.isOrderedToSit() || (this.tickCount % 20 == 0 && !this.level().getBlockState(farm).is(Blocks.NOTE_BLOCK))) {
 			this.forgetFarm();
 		}
 	}
 
 	private void forgetFarm() {
-		this.farmPos = null;
-		this.farmTicks = 0;
-		this.noCropsFound = false;
+		this.getBrain().eraseMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
+		this.getBrain().eraseMemory(BunnayAi.NO_CROPS_FOUND);
 	}
 
 	// Being told to sit makes it forget the note block at once, so it is not kept waiting for the 30 seconds to be up.
@@ -768,19 +952,19 @@ public class BunnayEntity extends TamableAnimal {
 		if (muffled) {
 			return;
 		}
-		if (this.farmPos == null) {
-			this.farmPos = pos;
-			this.farmTicks = FARM_FORGET_TICKS;
+		BlockPos farm = this.getFarmPos();
+		if (farm == null) {
+			this.getBrain().setMemoryWithExpiry(MemoryModuleType.LIKED_NOTEBLOCK_POSITION, GlobalPos.of(level.dimension(), pos), FARM_FORGET_TICKS);
 			// It has been given something to do: a chirp and a few notes over its head.
 			this.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.4F);
 			level.sendParticles(ParticleTypes.NOTE, this.getX(), this.getY() + this.getBbHeight() + 0.3, this.getZ(), 3, 0.3, 0.2, 0.3, 0.0);
-		} else if (this.farmPos.equals(pos)) {
-			this.farmTicks = FARM_FORGET_TICKS;
+		} else if (farm.equals(pos)) {
+			this.getBrain().setMemoryWithExpiry(MemoryModuleType.LIKED_NOTEBLOCK_POSITION, GlobalPos.of(level.dimension(), pos), FARM_FORGET_TICKS);
 		}
 	}
 
 	/** How many carrots it would deliver now: all the ordinary ones in its food slot but the FARM_KEEP_CARROTS it keeps. */
-	private int carrotsToDeliver() {
+	int carrotsToDeliver() {
 		ItemStack held = this.food.getItem(0);
 		return held.is(Items.CARROT) ? Math.max(0, held.getCount() - FARM_KEEP_CARROTS) : 0;
 	}
@@ -862,14 +1046,14 @@ public class BunnayEntity extends TamableAnimal {
 	// ---- planning a hop ----
 
 	/** A hop worked out: the launch velocity, where it lands, and the ticks it spends in the air. */
-	private record Hop(Vec3 velocity, Vec3 landing, int airTicks) {
+	record Hop(Vec3 velocity, Vec3 landing, int airTicks) {
 	}
 
 	private record Spot(double cost, Vec3 landing) {
 	}
 
 	/** Free to hop: on the ground and not busy with anything that has it standing, swimming, riding or dancing. */
-	private boolean canHopNow() {
+	boolean canHopNow() {
 		return this.onGround() && !this.isInWater() && !this.isPassenger() && !this.isBaby() && !this.isHopping() && !this.isEating()
 			&& !this.isDancing() && !this.isInSittingPose();
 	}
@@ -879,7 +1063,7 @@ public class BunnayEntity extends TamableAnimal {
 	 * fighting and cannot just walk there; the path it is walking, when that leads to where it is going; its owner, when it is
 	 * following them and cannot walk there; or the end of the path it is walking.
 	 */
-	private @Nullable Hop planTravelHop() {
+	@Nullable Hop planTravelHop() {
 		LivingEntity target = this.getTarget();
 		Path path = this.getNavigation().getPath();
 		boolean walking = path != null && !path.isDone() && path.getNodeCount() > 0;
@@ -896,11 +1080,8 @@ public class BunnayEntity extends TamableAnimal {
 
 	/** A hop that lands nearer a point, when there is no path to follow to it. It does not land on top of it. */
 	private @Nullable Hop planToward(Vec3 goal) {
-		double now = this.position().distanceTo(goal);
-		return this.planHop(landing -> {
-			double distance = landing.distanceTo(goal);
-			return distance < 1.2 ? Double.MAX_VALUE : distance;
-		}, now - HOP_MIN_DISTANCE);
+		double now = effort(this.position(), goal);
+		return this.planHop(landing -> landing.distanceTo(goal) < 1.2 ? Double.MAX_VALUE : effort(landing, goal), now - HOP_MIN_DISTANCE);
 	}
 
 	/**
@@ -1016,7 +1197,7 @@ public class BunnayEntity extends TamableAnimal {
 	 * for its body. Both come from the table of what a tick of movement does: the sideways speed follows from the distance, and
 	 * the upward speed from the height of the spot against where gravity would have it by then.
 	 */
-	private @Nullable Hop solveHop(Vec3 landing, int air) {
+	@Nullable Hop solveHop(Vec3 landing, int air) {
 		Vec3 here = this.position();
 		double dx = landing.x - here.x;
 		double dz = landing.z - here.z;
@@ -1054,10 +1235,6 @@ public class BunnayEntity extends TamableAnimal {
 			this.readyProgress = Mth.clamp(this.readyProgress + (ready ? READY_RISE : -READY_FALL), 0.0F, 1.0F);
 			this.eatProgressO = this.eatProgress;
 			this.eatProgress = Mth.clamp(this.eatProgress + (this.isEating() ? EAT_RISE : -EAT_FALL), 0.0F, 1.0F);
-		} else {
-			if (this.hopCooldown > 0) {
-				this.hopCooldown--;
-			}
 		}
 	}
 
@@ -1085,40 +1262,6 @@ public class BunnayEntity extends TamableAnimal {
 			// efficiency attribute (what Depth Strider sets, 0 to 1) closes that gap. 0.4 is about 2.8 times as fast, 4.5 blocks a
 			// second, roughly a walking pace; 0.2 is 2.1 times and 0.6 is 3.4 times.
 			.add(Attributes.WATER_MOVEMENT_EFFICIENCY, 0.4);
-	}
-
-	@Override
-	protected void registerGoals() {
-		// Fleeing is priority 1 so that it beats the chase, following and everything else (and it hops itself, since the hop goal
-		// could not run beside it).
-		this.goalSelector.addGoal(1, new FleeGoal(this));
-		this.goalSelector.addGoal(1, new FloatGoal(this));
-		this.goalSelector.addGoal(1, new TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
-		// Sitting is priority 2, as it is for a wolf: below floating and panicking, above everything else. What used to be
-		// at 2 and below is one number lower in the list for it (the melee goal is 3, and so on).
-		this.goalSelector.addGoal(2, new SitWhenOrderedToGoal(this));
-		// The hop is priority 2 so that it can interrupt the chase, the walk to its owner and so on (all lower), and it cannot be
-		// interrupted itself.
-		this.goalSelector.addGoal(2, new HopGoal(this));
-		this.goalSelector.addGoal(3, new DanceGoal(this));
-		this.goalSelector.addGoal(3, new BunnayMeleeGoal(this));
-		this.goalSelector.addGoal(4, new TemptGoal(this, 1.0, this::isFood, false));
-		this.goalSelector.addGoal(4, new GiveCarrotsGoal(this));
-		this.goalSelector.addGoal(4, new StayNearFarmGoal(this));
-		this.goalSelector.addGoal(4, new DeliverToNoteBlockGoal(this));
-		this.goalSelector.addGoal(5, new HarvestCarrotsGoal(this));
-		// Follows its owner like a wolf: starts from 10 blocks away and stops 2 blocks from them.
-		this.goalSelector.addGoal(5, new BunnayFollowOwnerGoal(this, 1.0, 10.0F, 2.0F));
-		// Picking up loose carrots is a low priority: below harvesting and following, above wandering about.
-		this.goalSelector.addGoal(6, new PickUpCarrotsGoal(this));
-		this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 0.8));
-		this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
-		this.goalSelector.addGoal(9, new RandomLookAroundGoal(this));
-
-		// Fights like a wolf: defends its owner, backs up the owner's attacks, and retaliates when hurt.
-		this.targetSelector.addGoal(1, new OwnerHurtByTargetGoal(this));
-		this.targetSelector.addGoal(2, new OwnerHurtTargetGoal(this));
-		this.targetSelector.addGoal(3, new HurtByTargetGoal(this).setAlertOthers());
 	}
 
 	// What it will go after on its owner's behalf is the wolf's own rule (Wolf.wantsToAttack): never a creeper, a ghast or an
@@ -1329,171 +1472,15 @@ public class BunnayEntity extends TamableAnimal {
 	}
 
 	/**
-	 * Runs from the enemies when it is low on health (see FLEE_BELOW_HEALTH). It looks around every few ticks for what to run
-	 * from, picks a place well away from them that it can walk to, and runs
-	 * there at FLEE_SPEED, picking again as it goes. Whenever its hop is off cooldown it hops along that route instead (the
-	 * cooldown is short while it flees); with no route, a hop that gets it further away. It ends when nothing is near it.
-	 */
-	private static final class FleeGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private final HopRun hop;
-		private List<Mob> threats = List.of();
-		private Vec3 threatCenter = Vec3.ZERO;
-		private int scanDelay;
-		private int repathDelay;
-
-		FleeGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.hop = new HopRun(bunnay);
-			// No JUMP flag, so that it keeps floating if it ends up in water.
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		private boolean ready() {
-			return this.bunnay.isScared() && !this.bunnay.isOrderedToSit() && !this.bunnay.isPassenger() && !this.bunnay.isBaby();
-		}
-
-		/** What it is running from, and the middle of it: nearer mobs count for more. */
-		private void look() {
-			this.threats = this.bunnay.findThreats();
-			Vec3 sum = Vec3.ZERO;
-			double total = 0.0;
-			for (Mob mob : this.threats) {
-				double weight = 1.0 / (this.bunnay.distanceTo(mob) + 2.0);
-				sum = sum.add(mob.position().scale(weight));
-				total += weight;
-			}
-			this.threatCenter = total > 0.0 ? sum.scale(1.0 / total) : Vec3.ZERO;
-		}
-
-		@Override
-		public boolean canUse() {
-			if (!this.ready() || --this.scanDelay > 0) {
-				return false;
-			}
-			this.scanDelay = FLEE_SCAN_TICKS;
-			this.look();
-			return !this.threats.isEmpty();
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return this.hop.running || (this.ready() && !this.threats.isEmpty());
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void start() {
-			this.bunnay.fleeing = true;
-			this.bunnay.stopEating();
-			this.bunnay.setTarget(null);
-			this.bunnay.getNavigation().stop();
-			this.repathDelay = 0;
-		}
-
-		@Override
-		public void tick() {
-			if (this.hop.running) {
-				this.hop.tick();
-				// In the air there is nothing else to do; the tick it lands it carries straight on running.
-				if (this.hop.running) {
-					return;
-				}
-			}
-			if (this.bunnay.tickCount % FLEE_SCAN_TICKS == 0) {
-				this.look();
-			}
-			if (this.threats.isEmpty()) {
-				return;
-			}
-			// Hop along the way it is running when it can; with no way to run, hop away if there is somewhere to.
-			if (!this.hop.running && this.bunnay.hopCooldown <= 0 && this.bunnay.canHopNow() && this.bunnay.tickCount % HOP_SCAN_INTERVAL == 0) {
-				Hop plan = this.bunnay.planTravelHop();
-				if (plan == null && !this.bunnay.getNavigation().isInProgress()) {
-					plan = this.bunnay.planAwayHop(this.threatCenter);
-				}
-				if (plan != null) {
-					this.hop.start(plan);
-					return;
-				}
-			}
-			if (--this.repathDelay <= 0 || this.bunnay.getNavigation().isDone()) {
-				this.repathDelay = FLEE_REPATH_TICKS;
-				this.runAway();
-			}
-		}
-
-		/** Picks a place away from the threats that it can walk to, and sets off for it. */
-		private void runAway() {
-			double now = this.bunnay.position().distanceTo(this.threatCenter);
-			for (int attempt = 0; attempt < 6; attempt++) {
-				Vec3 spot = DefaultRandomPos.getPosAway(this.bunnay, FLEE_AWAY_RANGE, FLEE_AWAY_VERTICAL, this.threatCenter);
-				if (spot == null || spot.distanceTo(this.threatCenter) <= now) {
-					continue;
-				}
-				Path path = this.bunnay.getNavigation().createPath(spot.x, spot.y, spot.z, 0);
-				if (path != null && path.canReach()) {
-					this.bunnay.getNavigation().moveTo(path, FLEE_SPEED);
-					return;
-				}
-			}
-		}
-
-		@Override
-		public void stop() {
-			this.hop.stop();
-			this.bunnay.fleeing = false;
-			this.bunnay.getNavigation().stop();
-		}
-	}
-
-	/** Follows its owner like any pet, and lets the bunnay know when it is doing it (see HopGoal and planTravelHop). */
-	private static final class BunnayFollowOwnerGoal extends FollowOwnerGoal {
-		private final BunnayEntity bunnay;
-
-		BunnayFollowOwnerGoal(BunnayEntity bunnay, double speed, float startDistance, float stopDistance) {
-			super(bunnay, speed, startDistance, stopDistance);
-			this.bunnay = bunnay;
-		}
-
-		// It does not follow its owner while it is tuned in to a note block.
-		@Override
-		public boolean canUse() {
-			return !this.bunnay.isFarming() && super.canUse();
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return !this.bunnay.isFarming() && super.canContinueToUse();
-		}
-
-		@Override
-		public void start() {
-			super.start();
-			this.bunnay.following = true;
-		}
-
-		@Override
-		public void stop() {
-			super.stop();
-			this.bunnay.following = false;
-		}
-	}
-
-	/**
 	 * Carries out one hop: the launch at once (facing the way it will go, with friction off), the flight, and the landing
 	 * (silent, which puts friction back and takes some of the sideways speed off it) after which it is free to move on that
-	 * very tick. The goals that hop own one of these and run it each tick. The animation is held while the flag is set.
+	 * very tick. The hop behaviours own one of these and run it each tick. The animation is held while the flag is set.
 	 */
-	private static final class HopRun {
+	static final class HopRun {
 		private final BunnayEntity bunnay;
 		private Hop hop;
 		private int ticks;
-		private boolean running;
+		boolean running;
 
 		HopRun(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -1546,194 +1533,15 @@ public class BunnayEntity extends TamableAnimal {
 			this.running = false;
 			this.bunnay.setDiscardFriction(false);
 			this.bunnay.entityData.set(DATA_HOPPING, false);
-			this.bunnay.hopCooldown = HOP_COOLDOWN_MIN + this.bunnay.getRandom().nextInt(HOP_COOLDOWN_RANGE);
-		}
-	}
-
-	/**
-	 * Hops towards where it is going, whenever the hop is off cooldown and there is a hop worth making (see planTravelHop).
-	 * It looks every HOP_SCAN_INTERVAL ticks, and it cannot be interrupted once it has started.
-	 */
-	private static final class HopGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private final HopRun run;
-		private Hop plan;
-		private int scanDelay;
-
-		HopGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.run = new HopRun(bunnay);
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
-		}
-
-		@Override
-		public boolean canUse() {
-			if (this.bunnay.hopCooldown > 0 || !this.bunnay.canHopNow() || --this.scanDelay > 0) {
-				return false;
-			}
-			this.scanDelay = HOP_SCAN_INTERVAL;
-			this.plan = this.bunnay.planTravelHop();
-			return this.plan != null;
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return this.run.running;
-		}
-
-		@Override
-		public boolean isInterruptable() {
-			return false;
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void start() {
-			this.run.start(this.plan);
-		}
-
-		@Override
-		public void tick() {
-			this.run.tick();
-		}
-
-		@Override
-		public void stop() {
-			this.run.stop();
+			this.bunnay.startHopCooldown();
 		}
 	}
 
 	/** Calm and free to go about farm business: tame, not sitting, dancing, eating, hopping, riding or fighting. */
-	private boolean freeForFarmWork() {
+	boolean freeForFarmWork() {
 		LivingEntity target = this.getTarget();
 		return this.isTame() && !this.isBaby() && !this.isOrderedToSit() && !this.isDancing() && !this.isEating() && !this.isHopping()
 			&& !this.isPassenger() && !this.fleeing && (target == null || !target.isAlive());
-	}
-
-	/**
-	 * Pulls it back to the note block it is tuned in to when it has got further than FARM_LEASH from it, like the allay's
-	 * "stay close to the target": it heads for the note block until it is within FARM_CLOSE_ENOUGH.
-	 */
-	private static final class StayNearFarmGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private int ticks;
-
-		StayNearFarmGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		@Override
-		public boolean canUse() {
-			BlockPos farm = this.bunnay.farmPos;
-			return farm != null && this.bunnay.freeForFarmWork() && this.bunnay.distanceToSqr(Vec3.atCenterOf(farm)) > FARM_LEASH * FARM_LEASH;
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			BlockPos farm = this.bunnay.farmPos;
-			return farm != null && this.bunnay.freeForFarmWork() && this.ticks < FARM_DELIVER_GIVE_UP_TICKS
-				&& this.bunnay.distanceToSqr(Vec3.atCenterOf(farm)) > FARM_CLOSE_ENOUGH * FARM_CLOSE_ENOUGH;
-		}
-
-		@Override
-		public void start() {
-			this.ticks = 0;
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void tick() {
-			BlockPos farm = this.bunnay.farmPos;
-			if (farm == null) {
-				return;
-			}
-			this.ticks++;
-			if (this.ticks % 10 == 1) {
-				this.bunnay.getNavigation().moveTo(farm.getX() + 0.5, farm.getY() + 1, farm.getZ() + 0.5, 1.2);
-			}
-		}
-
-		@Override
-		public void stop() {
-			this.bunnay.getNavigation().stop();
-		}
-	}
-
-	/**
-	 * Takes the harvest to the note block it is tuned in to and tosses it there, the way an allay hands over what it has
-	 * collected. It does that when its food slot is full or the harvest goal found nothing left to harvest, and it has more
-	 * carrots than the FARM_KEEP_CARROTS it keeps for itself.
-	 */
-	private static final class DeliverToNoteBlockGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private int ticks;
-		private boolean delivered;
-
-		DeliverToNoteBlockGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		private boolean shouldDeliver() {
-			return this.bunnay.farmPos != null && this.bunnay.freeForFarmWork() && this.bunnay.carrotsToDeliver() > 0
-				&& (!this.bunnay.canTakeCarrots() || this.bunnay.noCropsFound);
-		}
-
-		@Override
-		public boolean canUse() {
-			return this.bunnay.deliverCooldown <= 0 && this.shouldDeliver();
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return !this.delivered && this.ticks < FARM_DELIVER_GIVE_UP_TICKS && this.shouldDeliver();
-		}
-
-		@Override
-		public void start() {
-			this.ticks = 0;
-			this.delivered = false;
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void tick() {
-			BlockPos farm = this.bunnay.farmPos;
-			if (farm == null) {
-				return;
-			}
-			this.ticks++;
-			Vec3 target = Vec3.atCenterOf(farm);
-			this.bunnay.getLookControl().setLookAt(target.x, target.y, target.z);
-			if (this.bunnay.distanceToSqr(target) <= FARM_DELIVER_DISTANCE * FARM_DELIVER_DISTANCE) {
-				ItemStack load = this.bunnay.food.removeItem(0, this.bunnay.carrotsToDeliver());
-				BehaviorUtils.throwItem(this.bunnay, load, target);
-				this.bunnay.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.3F);
-				this.bunnay.deliverCooldown = FARM_DELIVER_COOLDOWN;
-				this.bunnay.getNavigation().stop();
-				this.delivered = true;
-			} else if (this.ticks % 10 == 1) {
-				this.bunnay.getNavigation().moveTo(target.x, farm.getY() + 1, target.z, 1.2);
-			}
-		}
-
-		@Override
-		public void stop() {
-			this.bunnay.getNavigation().stop();
-		}
 	}
 
 	/** Hears a note block played: the allay's listener for it (Allay.VibrationUser), pointed at this bunnay (see hearNoteBlock). */
@@ -1765,111 +1573,6 @@ public class BunnayEntity extends TamableAnimal {
 				return true;
 			}
 			return false;
-		}
-	}
-
-	/**
-	 * Goes to carrots lying on the ground and picks them up into its food slot, when it has room and nothing better to do (see
-	 * PICK_UP_RADIUS). It looks every second or so, takes the nearest one it has a path to, and gives up on one it cannot reach.
-	 */
-	private static final class PickUpCarrotsGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private ItemEntity item;
-		private int ticks;
-		private int scanDelay;
-
-		PickUpCarrotsGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		private boolean ready() {
-			return this.bunnay.level() instanceof ServerLevel level && this.bunnay.freeForFarmWork() && this.bunnay.canTakeCarrots()
-				&& level.getGameRules().get(GameRules.MOB_GRIEFING);
-		}
-
-		private boolean wanted(ItemEntity candidate) {
-			ItemStack stack = candidate.getItem();
-			if (candidate.isRemoved() || candidate.hasPickUpDelay() || !isCarrot(stack) || !this.bunnay.food.canAddItem(stack)
-				|| candidate.getOwner() instanceof BunnayEntity) {
-				return false;
-			}
-			// Within reach of the note block it is tuned in to, or of its owner when it is not.
-			BlockPos farm = this.bunnay.farmPos;
-			LivingEntity owner = this.bunnay.getOwner();
-			if (farm != null) {
-				return farm.distToCenterSqr(candidate.position()) <= FARM_LEASH * FARM_LEASH;
-			}
-			return owner == null || owner.distanceToSqr(candidate) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
-		}
-
-		@Override
-		public boolean canUse() {
-			if (this.scanDelay > 0) {
-				this.scanDelay--;
-				return false;
-			}
-			this.scanDelay = 20 + this.bunnay.getRandom().nextInt(20);
-			if (!this.ready()) {
-				return false;
-			}
-			List<ItemEntity> found = this.bunnay.level().getEntitiesOfClass(ItemEntity.class,
-				this.bunnay.getBoundingBox().inflate(PICK_UP_RADIUS, PICK_UP_HEIGHT, PICK_UP_RADIUS), this::wanted);
-			found.sort(Comparator.comparingDouble(candidate -> this.bunnay.distanceToSqr(candidate)));
-			for (ItemEntity candidate : found.stream().limit(5).toList()) {
-				if (this.bunnay.getNavigation().createPath(candidate, 1) != null) {
-					this.item = candidate;
-					return true;
-				}
-			}
-			return false;
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return this.item != null && this.ticks < PICK_UP_GIVE_UP_TICKS && this.ready() && this.wanted(this.item);
-		}
-
-		@Override
-		public void start() {
-			this.ticks = 0;
-			this.bunnay.getNavigation().moveTo(this.item, 1.2);
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void tick() {
-			if (this.item == null) {
-				return;
-			}
-			this.ticks++;
-			this.bunnay.getLookControl().setLookAt(this.item);
-			if (this.bunnay.distanceToSqr(this.item) > 1.3 * 1.3) {
-				if (this.bunnay.getNavigation().isDone()) {
-					this.bunnay.getNavigation().moveTo(this.item, 1.2);
-				}
-				return;
-			}
-			// Close enough: into the food slot (what does not fit stays on the ground).
-			ItemStack leftover = this.bunnay.food.addItem(this.item.getItem().copy());
-			if (leftover.isEmpty()) {
-				this.item.discard();
-			} else {
-				this.item.setItem(leftover);
-			}
-			this.bunnay.food.setChanged();
-			this.bunnay.level().playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
-			this.item = null;
-		}
-
-		@Override
-		public void stop() {
-			this.item = null;
-			this.bunnay.getNavigation().stop();
 		}
 	}
 
@@ -1909,387 +1612,4 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	/** Stands still while it dances, so the sway in the model is all that moves. A fight takes priority. */
-	private static final class DanceGoal extends Goal {
-		private final BunnayEntity bunnay;
-
-		DanceGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.JUMP, Flag.LOOK));
-		}
-
-		@Override
-		public boolean canUse() {
-			LivingEntity target = this.bunnay.getTarget();
-			return this.bunnay.isDancing() && (target == null || !target.isAlive());
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return this.canUse();
-		}
-
-		@Override
-		public void start() {
-			this.bunnay.getNavigation().stop();
-		}
-	}
-
-	/** The usual melee goal, except that it may swing a little before the cooldown is up (see ATTACK_HEAD_START_TICKS). */
-	private static final class BunnayMeleeGoal extends MeleeAttackGoal {
-		BunnayMeleeGoal(BunnayEntity bunnay) {
-			super(bunnay, 1.3, true);
-		}
-
-		@Override
-		protected boolean isTimeToAttack() {
-			return this.getTicksUntilNextAttack() <= ATTACK_HEAD_START_TICKS;
-		}
-	}
-
-	/**
-	 * Harvests one fully grown carrot at a time, the way a person would: it walks to the carrot, swings at it and breaks it, so
-	 * the carrots really drop; then it walks to the dropped carrots and picks them up into its food slot; waits a moment; and
-	 * plants a new carrot in the spot. It is built so that nothing can leave it stuck: every part has a time limit, drops that
-	 * are picked up by someone else (or despawn) are simply skipped, and if the job is interrupted after the carrot was broken
-	 * (a fight), the new carrot is planted right then so there is never a hole in the field. When it is done with one
-	 * carrot it goes straight on to the next ripe one, so a row is worked through without pause.
-	 */
-	private static final class HarvestCarrotsGoal extends Goal {
-		private enum Phase {
-			/** Heading for the ripe carrot, then swinging at it. */
-			GO_TO_CROP,
-			/** The carrot is broken; collecting what it dropped. */
-			PICK_UP,
-			/** Waiting a moment next to the spot before planting. */
-			WAIT
-		}
-
-		private final BunnayEntity bunnay;
-		private BlockPos crop;
-		private Phase phase = Phase.GO_TO_CROP;
-		/** Whether the carrot at crop has been broken, so a new one is owed. */
-		private boolean broken;
-		private final List<ItemEntity> drops = new java.util.ArrayList<>();
-		private int workTicks;
-		private int phaseTicks;
-		private int giveUpTicks;
-		/** Ticks until it next scans for carrots, so the search is not done every tick. */
-		private int scanDelay;
-
-		HarvestCarrotsGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		/** Calm and free to work: tame, not busy with anything else, and not in a fight. */
-		private boolean freeToWork() {
-			LivingEntity target = this.bunnay.getTarget();
-			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
-				&& !this.bunnay.isEating() && !this.bunnay.isHopping() && !this.bunnay.isPassenger()
-				&& (target == null || !target.isAlive());
-		}
-
-		/** Able to start on a new carrot: free to work, with room for carrots, and mobs may grief. */
-		private boolean canStart() {
-			return this.bunnay.level() instanceof ServerLevel level && this.freeToWork() && this.bunnay.canTakeCarrots()
-				&& level.getGameRules().get(GameRules.MOB_GRIEFING);
-		}
-
-		private boolean isRipeCarrot(BlockPos pos) {
-			BlockState state = this.bunnay.level().getBlockState(pos);
-			return state.getBlock() instanceof CarrotBlock carrots && carrots.isMaxAge(state);
-		}
-
-		@Override
-		public boolean canUse() {
-			if (this.scanDelay > 0) {
-				this.scanDelay--;
-				return false;
-			}
-			this.scanDelay = 20 + this.bunnay.getRandom().nextInt(20);
-			if (!this.canStart()) {
-				return false;
-			}
-			this.crop = this.findCrop();
-			this.bunnay.noCropsFound = this.crop == null;
-			return this.crop != null;
-		}
-
-		/** The nearest ripe carrot (close enough to its owner) that it has a path to, or null. */
-		private BlockPos findCrop() {
-			LivingEntity owner = this.bunnay.getOwner();
-			BlockPos farm = this.bunnay.farmPos;
-			BlockPos origin = this.bunnay.blockPosition();
-			List<BlockPos> ripe = new java.util.ArrayList<>();
-			for (BlockPos pos : BlockPos.betweenClosed(
-				origin.offset(-HARVEST_SEARCH_RADIUS, -HARVEST_SEARCH_HEIGHT, -HARVEST_SEARCH_RADIUS),
-				origin.offset(HARVEST_SEARCH_RADIUS, HARVEST_SEARCH_HEIGHT, HARVEST_SEARCH_RADIUS)
-			)) {
-				// Close enough to the note block it is tuned in to, or to its owner when it is not.
-				boolean near = farm != null
-					? farm.distToCenterSqr(Vec3.atCenterOf(pos)) <= FARM_LEASH * FARM_LEASH
-					: owner == null || owner.distanceToSqr(Vec3.atCenterOf(pos)) <= HARVEST_OWNER_RANGE * HARVEST_OWNER_RANGE;
-				if (this.isRipeCarrot(pos) && near) {
-					ripe.add(pos.immutable());
-				}
-			}
-			ripe.sort(Comparator.comparingDouble(pos -> this.bunnay.distanceToSqr(Vec3.atCenterOf(pos))));
-			for (BlockPos pos : ripe.stream().limit(5).toList()) {
-				if (this.bunnay.getNavigation().createPath(pos, 1) != null) {
-					return pos;
-				}
-			}
-			return null;
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			if (this.crop == null || this.giveUpTicks >= HARVEST_GIVE_UP_TICKS || !this.freeToWork()) {
-				return false;
-			}
-			// Until it is broken, the carrot has to still be there and ripe (someone else may have taken it).
-			return this.phase != Phase.GO_TO_CROP || (this.bunnay.canTakeCarrots() && this.isRipeCarrot(this.crop));
-		}
-
-		@Override
-		public void start() {
-			this.phase = Phase.GO_TO_CROP;
-			this.broken = false;
-			this.drops.clear();
-			this.workTicks = 0;
-			this.phaseTicks = 0;
-			this.giveUpTicks = 0;
-			this.bunnay.getNavigation().moveTo(this.crop.getX() + 0.5, this.crop.getY(), this.crop.getZ() + 0.5, 1.2);
-		}
-
-		@Override
-		public void stop() {
-			// However the job ended (finished, interrupted, timed out), a carrot that was broken is replaced now, so it
-			// never leaves a hole in the field.
-			if (this.broken && this.crop != null && this.bunnay.level() instanceof ServerLevel level) {
-				this.plant(level);
-			}
-			this.crop = null;
-			this.broken = false;
-			this.drops.clear();
-			this.bunnay.getNavigation().stop();
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void tick() {
-			// The goal can be ticked once more after the job is done (it is checked for ending only every other tick).
-			if (this.crop == null || !(this.bunnay.level() instanceof ServerLevel level)) {
-				return;
-			}
-			this.giveUpTicks++;
-			switch (this.phase) {
-				case GO_TO_CROP -> this.tickGoToCrop(level);
-				case PICK_UP -> this.tickPickUp();
-				case WAIT -> this.tickWait(level);
-			}
-		}
-
-		private void tickGoToCrop(ServerLevel level) {
-			Vec3 center = Vec3.atCenterOf(this.crop);
-			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
-			if (this.bunnay.distanceToSqr(center) > 1.9 * 1.9) {
-				// Still on its way (or the path ran out short): keep heading for it.
-				this.workTicks = 0;
-				if (this.bunnay.getNavigation().isDone()) {
-					this.bunnay.getNavigation().moveTo(center.x, this.crop.getY(), center.z, 1.2);
-				}
-				return;
-			}
-			this.bunnay.getNavigation().stop();
-			this.workTicks++;
-			if (this.workTicks == 1) {
-				this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
-			}
-			if (this.workTicks >= HARVEST_WORK_TICKS) {
-				this.breakCrop(level);
-			}
-		}
-
-		/** Breaks the carrot so that it drops its carrots, and notes the dropped items to go and collect. */
-		private void breakCrop(ServerLevel level) {
-			if (!this.isRipeCarrot(this.crop)) {
-				return;
-			}
-			level.destroyBlock(this.crop, true, this.bunnay);
-			this.broken = true;
-			// The items it just dropped: carrots that appeared a moment ago next to where the carrot was.
-			this.drops.clear();
-			this.drops.addAll(level.getEntitiesOfClass(ItemEntity.class, new net.minecraft.world.phys.AABB(this.crop).inflate(1.5), item -> item.getAge() < 20));
-			this.phase = Phase.PICK_UP;
-			this.phaseTicks = 0;
-		}
-
-		private void tickPickUp() {
-			this.phaseTicks++;
-			// Drops that someone else picked up, or that are gone, are simply skipped.
-			this.drops.removeIf(item -> item.isRemoved() || item.getItem().isEmpty());
-			if (this.drops.isEmpty() || !this.bunnay.canTakeCarrots() || this.phaseTicks > HARVEST_PICK_UP_TICKS) {
-				this.startWaiting();
-				return;
-			}
-
-			ItemEntity next = this.drops.stream().min(Comparator.comparingDouble(item -> this.bunnay.distanceToSqr(item))).get();
-			this.bunnay.getLookControl().setLookAt(next);
-			if (this.bunnay.distanceToSqr(next) > 1.3 * 1.3) {
-				if (this.bunnay.getNavigation().isDone()) {
-					this.bunnay.getNavigation().moveTo(next, 1.2);
-				}
-				return;
-			}
-
-			// Close enough: pick it up into the food slot (what does not fit stays on the ground).
-			ItemStack stack = next.getItem();
-			ItemStack leftover = this.bunnay.food.addItem(stack.copy());
-			if (leftover.isEmpty()) {
-				next.discard();
-			} else {
-				next.setItem(leftover);
-			}
-			this.bunnay.food.setChanged();
-			this.bunnay.level().playSound(null, this.bunnay.getX(), this.bunnay.getY(), this.bunnay.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.3F, 1.4F);
-		}
-
-		private void startWaiting() {
-			this.phase = Phase.WAIT;
-			this.phaseTicks = 0;
-			this.bunnay.getNavigation().stop();
-		}
-
-		/** A second beside the spot (walking back to it if it wandered off after the drops), then plants. */
-		private void tickWait(ServerLevel level) {
-			Vec3 center = Vec3.atCenterOf(this.crop);
-			this.bunnay.getLookControl().setLookAt(center.x, center.y - 0.3, center.z);
-			if (this.bunnay.distanceToSqr(center) > 2.2 * 2.2) {
-				this.phaseTicks = 0;
-				if (this.bunnay.getNavigation().isDone()) {
-					this.bunnay.getNavigation().moveTo(center.x, this.crop.getY(), center.z, 1.2);
-				}
-				return;
-			}
-			this.bunnay.getNavigation().stop();
-			this.phaseTicks++;
-			if (this.phaseTicks >= HARVEST_REPLANT_DELAY_TICKS) {
-				this.plant(level);
-				this.startNextCarrot();
-			}
-		}
-
-		/**
-		 * Straight on to the next ripe carrot, if there is one, without letting go of the goal (so nothing else gets a turn in
-		 * between, and there is no wait for the next search). With none left it ends, and a search follows shortly.
-		 */
-		private void startNextCarrot() {
-			boolean canStart = this.canStart();
-			BlockPos next = canStart ? this.findCrop() : null;
-			this.bunnay.noCropsFound = canStart && next == null;
-			if (next == null) {
-				this.crop = null;
-				this.scanDelay = 20;
-				return;
-			}
-			this.crop = next;
-			this.phase = Phase.GO_TO_CROP;
-			this.broken = false;
-			this.drops.clear();
-			this.workTicks = 0;
-			this.phaseTicks = 0;
-			this.giveUpTicks = 0;
-			this.bunnay.getNavigation().moveTo(next.getX() + 0.5, next.getY(), next.getZ() + 0.5, 1.2);
-		}
-
-		/** Plants a new carrot in the spot, if it is still empty with farmland under it (and loaded). Free of cost. */
-		private void plant(ServerLevel level) {
-			BlockPos spot = this.crop;
-			this.broken = false;
-			if (spot == null || !level.isLoaded(spot) || !level.getBlockState(spot).isAir() || !level.getBlockState(spot.below()).is(Blocks.FARMLAND)) {
-				return;
-			}
-			level.setBlockAndUpdate(spot, Blocks.CARROTS.defaultBlockState());
-			level.playSound(null, spot, SoundEvents.CROP_PLANTED, SoundSource.NEUTRAL, 0.8F, 1.0F);
-			this.bunnay.swing(InteractionHand.MAIN_HAND, this.bunnay.getMainHandItem().getInteractAnimation());
-		}
-	}
-
-	/**
-	 * Gives carrots to a hungry owner: it walks to them and tosses them the carrots (see the GIFT_ constants). It only does
-	 * it when it has nothing else going on: no fight, not sitting, dancing, eating or hopping.
-	 */
-	private static final class GiveCarrotsGoal extends Goal {
-		private final BunnayEntity bunnay;
-		private int ticks;
-		private boolean gave;
-
-		GiveCarrotsGoal(BunnayEntity bunnay) {
-			this.bunnay = bunnay;
-			this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-		}
-
-		private boolean shouldGive() {
-			LivingEntity target = this.bunnay.getTarget();
-			return this.bunnay.isTame() && !this.bunnay.isBaby() && !this.bunnay.isOrderedToSit() && !this.bunnay.isDancing()
-				&& !this.bunnay.isEating() && !this.bunnay.isHopping() && !this.bunnay.isPassenger()
-				&& (target == null || !target.isAlive())
-				&& this.bunnay.carrotsToGive() > 0 && this.bunnay.hungryOwner() != null;
-		}
-
-		@Override
-		public boolean canUse() {
-			return this.bunnay.giftCooldown <= 0 && this.shouldGive();
-		}
-
-		@Override
-		public boolean canContinueToUse() {
-			return !this.gave && this.ticks < GIFT_GIVE_UP_TICKS && this.shouldGive();
-		}
-
-		@Override
-		public void start() {
-			this.ticks = 0;
-			this.gave = false;
-		}
-
-		@Override
-		public boolean requiresUpdateEveryTick() {
-			return true;
-		}
-
-		@Override
-		public void tick() {
-			ServerPlayer owner = this.bunnay.hungryOwner();
-			if (owner == null) {
-				return;
-			}
-			this.ticks++;
-			this.bunnay.getLookControl().setLookAt(owner, 30.0F, 30.0F);
-			if (this.bunnay.distanceToSqr(owner) <= GIFT_REACH * GIFT_REACH) {
-				ItemStack gift = this.bunnay.food.removeItem(0, this.bunnay.carrotsToGive());
-				BehaviorUtils.throwItem(this.bunnay, gift, owner.position());
-				this.bunnay.playSound(SoundEvents.RABBIT_AMBIENT, 1.0F, 1.3F);
-				this.bunnay.giftCooldown = GIFT_COOLDOWN_TICKS;
-				this.bunnay.getNavigation().stop();
-				this.gave = true;
-			} else if (this.ticks % 10 == 1) {
-				this.bunnay.getNavigation().moveTo(owner, 1.2);
-			}
-		}
-
-		@Override
-		public void stop() {
-			if (!this.gave && this.ticks >= GIFT_GIVE_UP_TICKS) {
-				this.bunnay.giftCooldown = GIFT_RETRY_TICKS;
-			}
-			this.bunnay.getNavigation().stop();
-		}
-	}
 }

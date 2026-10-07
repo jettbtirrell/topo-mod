@@ -112,6 +112,10 @@ public class BunnayModel extends EntityModel<BunnayRenderState> implements Armed
 		// The player's walk (HumanoidModel): legs swing 1.4 radians and arms 1.0 radian at full speed, each arm
 		// opposite to the leg on its own side.
 		float step = Mth.cos(state.walkAnimationPos * 0.6662F) * state.walkAnimationSpeed;
+		// In the air the hop clip holds one pose, so there is no walk swing under it (the speed it took off with would wiggle the arms).
+		if (state.hopAnimationState.isStarted()) {
+			step = 0.0F;
+		}
 		if (state.isSitting) {
 			step = 0.0F;
 			this.animateSit();
