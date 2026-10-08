@@ -27,7 +27,31 @@ public final class BunnayDebugCommand {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			dispatcher.register(Commands.literal("bunnay")
 				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-				.then(Commands.literal("hop").executes(BunnayDebugCommand::hop))));
+				.then(Commands.literal("hop").executes(BunnayDebugCommand::hop))
+				.then(Commands.literal("glow")
+					.executes(context -> glow(context, !BunnayEntity.debugGlow))
+					.then(Commands.literal("on").executes(context -> glow(context, true)))
+					.then(Commands.literal("off").executes(context -> glow(context, false))))
+				.then(Commands.literal("log")
+					.executes(context -> log(context, !BunnayEntity.debugLogging))
+					.then(Commands.literal("on").executes(context -> log(context, true)))
+					.then(Commands.literal("off").executes(context -> log(context, false))))));
+	}
+
+	// DEBUG-TEMP: /bunnay glow on|off marks the landing spots a hop scan looks at with coloured sparks.
+	private static int glow(CommandContext<CommandSourceStack> context, boolean on) {
+		BunnayEntity.debugGlow = on;
+		context.getSource().sendSuccess(() -> Component.literal("Bunnay hop spot markers: " + (on
+			? "on (green = the hop taken, yellow = reachable by arc but walkable, red = no arc)"
+			: "off")), true);
+		return on ? 1 : 0;
+	}
+
+	// DEBUG-TEMP: /bunnay log on|off writes what the hops, the flee and the fights are doing to the game log (lines starting [bunnay).
+	private static int log(CommandContext<CommandSourceStack> context, boolean on) {
+		BunnayEntity.debugLogging = on;
+		context.getSource().sendSuccess(() -> Component.literal("Bunnay logging: " + (on ? "on (see logs/latest.log, lines with [bunnay)" : "off")), true);
+		return on ? 1 : 0;
 	}
 
 	private static int hop(CommandContext<CommandSourceStack> context) {

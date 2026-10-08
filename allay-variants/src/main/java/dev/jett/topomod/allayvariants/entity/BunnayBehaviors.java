@@ -166,6 +166,10 @@ final class BunnayBehaviors {
 	static final class TargetTracking extends Behavior<BunnayEntity> {
 		private static final int NONE = 99;
 		private static final int HURT_BY_UNSEEN_TICKS = 300;
+		/** It gives up on a target after this long (10 seconds) with no route to it, out of reach and without having landed a hit. */
+		private static final int GIVE_UP_TICKS = 200;
+		/** A hit it landed this recently (2 seconds) counts as the fight going on. */
+		private static final int RECENT_HIT_TICKS = 40;
 		private static final TargetingConditions HURT_BY = TargetingConditions.forCombat().ignoreLineOfSight().ignoreInvisibilityTesting();
 
 		private int ownerHurtByStamp;
@@ -173,6 +177,7 @@ final class BunnayBehaviors {
 		private int hurtByStamp;
 		private int priority = NONE;
 		private int unseenTicks;
+		private int unreachableTicks;
 
 		TargetTracking() {
 			super(memories(MemoryModuleType.ATTACK_TARGET, MemoryStatus.REGISTERED), NO_TIMEOUT);
@@ -186,9 +191,15 @@ final class BunnayBehaviors {
 				bunnay.setTarget(null);
 				current = null;
 			}
+			if (current != null && this.tiredOfTrying(bunnay, current)) {
+				bunnay.debugLog("gave up on %s: no route, out of reach and no hit for %d ticks", current.getType().getDescriptionId(), GIVE_UP_TICKS);
+				bunnay.setTarget(null);
+				current = null;
+			}
 			if (current == null) {
 				this.priority = NONE;
 				this.unseenTicks = 0;
+				this.unreachableTicks = 0;
 			}
 			if (bunnay.isScared() && current != null) {
 				bunnay.setTarget(null);
@@ -224,8 +235,23 @@ final class BunnayBehaviors {
 			return false;
 		}
 
+		/**
+		 * Whether it has had no way to get at the target for long enough to give up, the way the Brain mobs do: counting only the
+		 * time with no route to it, out of reach of a swing, and no hit landed lately. Any of those ends the count, and a target
+		 * it picks up afresh starts it again.
+		 */
+		private boolean tiredOfTrying(BunnayEntity bunnay, LivingEntity target) {
+			Path path = bunnay.getNavigation().getPath();
+			boolean gettingSomewhere = bunnay.isWithinMeleeAttackRange(target) || (path != null && path.canReach())
+				|| bunnay.tickCount - bunnay.getLastHurtMobTimestamp() <= RECENT_HIT_TICKS;
+			this.unreachableTicks = gettingSomewhere ? 0 : this.unreachableTicks + 1;
+			return this.unreachableTicks > GIVE_UP_TICKS;
+		}
+
 		private void take(BunnayEntity bunnay, LivingEntity target, int importance) {
+			this.unreachableTicks = 0;
 			bunnay.setTarget(target);
+			bunnay.debugLog("took target %s (importance %d)", target.getType().getDescriptionId(), importance);
 			if (bunnay.getBrain().hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
 				this.priority = importance;
 				this.unseenTicks = 0;
@@ -268,9 +294,9 @@ final class BunnayBehaviors {
 	}
 
 	/**
-	 * The two halves of a hop, as in the frog's long jump: HopPrepare looks every so often (once the cooldown is over) for a hop
-	 * worth making and starts it, setting the mid-jump memory, and HopMidJump flies it. There is no wind-up: the launch is on the
-	 * very tick the hop is chosen. Fleeing uses the same pair (the hop away from its threats when it has no route to run along).
+	 * The two halves of a hop, as in the frog's long jump: HopPrepare looks every so often (once the cooldown is over, and only
+	 * with a reason to hop: see BunnayEntity.hopReason) for a spot it could land on and not walk to, and starts the hop, setting
+	 * the mid-jump memory, and HopMidJump flies it. There is no wind-up: the launch is on the very tick the hop is chosen.
 	 */
 	static final class HopPrepare extends Behavior<BunnayEntity> {
 		private final BunnayEntity.HopRun run;
@@ -288,27 +314,16 @@ final class BunnayBehaviors {
 
 		@Override
 		protected boolean checkExtraStartConditions(ServerLevel level, BunnayEntity bunnay) {
-			if (!bunnay.canHopNow()) {
+			// Looking for somewhere to land is only done with a reason to hop, and at a steady pace.
+			if (!bunnay.canHopNow() || bunnay.hopReason() == null) {
+				this.scanDelay = 0;
 				return false;
 			}
-			Optional<Vec3> threats = bunnay.getBrain().getMemory(BunnayAi.FLEE_THREAT_CENTER);
-			if (threats.isPresent()) {
-				// Fleeing: hop along the way it is running when it can; with no way to run, hop away if there is somewhere to.
-				if (bunnay.tickCount % BunnayEntity.HOP_SCAN_INTERVAL != 0) {
-					return false;
-				}
-				this.plan = bunnay.planTravelHop();
-				if (this.plan == null && !bunnay.getNavigation().isInProgress()) {
-					this.plan = bunnay.planAwayHop(threats.get());
-				}
-			} else {
-				// A scan every 10 ticks.
-				if (--this.scanDelay > 0) {
-					return false;
-				}
-				this.scanDelay = BunnayEntity.HOP_SCAN_INTERVAL * 2;
-				this.plan = bunnay.planTravelHop();
+			if (--this.scanDelay > 0) {
+				return false;
 			}
+			this.plan = bunnay.planReasonedHop();
+			this.scanDelay = this.plan == null ? BunnayEntity.HOP_RETRY_TICKS : BunnayEntity.HOP_SCAN_TICKS;
 			return this.plan != null;
 		}
 
@@ -635,6 +650,7 @@ final class BunnayBehaviors {
 			if (this.player == null) {
 				return;
 			}
+			bunnay.temptedBy = this.player;
 			bunnay.getLookControl().setLookAt(this.player, bunnay.getMaxHeadYRot() + 20, bunnay.getMaxHeadXRot());
 			if (bunnay.distanceToSqr(this.player) < STOP_DISTANCE * STOP_DISTANCE) {
 				bunnay.getNavigation().stop();
@@ -646,6 +662,7 @@ final class BunnayBehaviors {
 		@Override
 		void end(ServerLevel level, BunnayEntity bunnay) {
 			this.player = null;
+			bunnay.temptedBy = null;
 			bunnay.getNavigation().stop();
 			this.calmDown = 100;
 		}

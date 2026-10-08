@@ -19,8 +19,8 @@ public final class ModEntities {
 		BuiltInRegistries.ENTITY_TYPE,
 		BUNNAY_KEY,
 		EntityType.Builder.of(BunnayEntity::new, MobCategory.CREATURE)
-			.sized(0.5F, 0.875F)
-			.eyeHeight(0.7F)
+			.sized(0.5F, 0.5F)
+			.eyeHeight(0.4F)
 			.clientTrackingRange(8)
 			.build(BUNNAY_KEY)
 	);
