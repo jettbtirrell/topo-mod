@@ -67,47 +67,42 @@ final class BunnaySensors {
 		}
 	}
 
-	/** Finds the mobs a scared bunnay runs from, and the middle of them (nearer ones count for more). */
+	/**
+	 * Keeps track of the mobs a scared bunnay runs from, and says which is the nearest (the AVOID_TARGET the flee goes by). A mob
+	 * joins when it is after the bunnay (has it as its target) within FLEE_SEARCH_RADIUS while the bunnay is scared, and stays until
+	 * it is dead or gone or the bunnay is further than FLEE_SEARCH_RADIUS from it. So the bunnay keeps running until it is that far
+	 * from every one of them, even once it is back above the health that made it run.
+	 */
 	static final class Threats extends Sensor<BunnayEntity> {
+		private final Set<Mob> pursuers = new java.util.HashSet<>();
+
 		Threats() {
 			super(5);
 		}
 
 		@Override
 		public Set<MemoryModuleType<?>> requires() {
-			return Set.of(BunnayAi.FLEE_THREAT_CENTER, BunnayAi.FLEE_AWAY);
+			return Set.of(MemoryModuleType.AVOID_TARGET);
 		}
 
 		@Override
 		protected void doTick(ServerLevel level, BunnayEntity bunnay) {
 			Brain<BunnayEntity> brain = bunnay.getBrain();
-			if (!bunnay.fleeReady()) {
-				brain.eraseMemory(BunnayAi.FLEE_THREAT_CENTER);
-				brain.eraseMemory(BunnayAi.FLEE_AWAY);
-				bunnay.debugThreats(List.of());
-				return;
-			}
-			List<Mob> threats = bunnay.findThreats();
-			bunnay.debugThreats(threats);
-			Vec3 sum = Vec3.ZERO;
-			Vec3 away = Vec3.ZERO;
-			double total = 0.0;
-			for (Mob mob : threats) {
-				double weight = 1.0 / (bunnay.distanceTo(mob) + 2.0);
-				sum = sum.add(mob.position().scale(weight));
-				// Each threat pushes it straight away from itself, the nearer ones harder, so threats on both sides cancel out.
-				Vec3 offset = bunnay.position().subtract(mob.position()).multiply(1.0, 0.0, 1.0);
-				if (offset.lengthSqr() > 1.0E-4) {
-					away = away.add(offset.normalize().scale(weight));
-				}
-				total += weight;
-			}
-			if (total > 0.0) {
-				brain.setMemory(BunnayAi.FLEE_THREAT_CENTER, sum.scale(1.0 / total));
-				brain.setMemory(BunnayAi.FLEE_AWAY, away);
+			double farSqr = BunnayEntity.FLEE_SEARCH_RADIUS * BunnayEntity.FLEE_SEARCH_RADIUS;
+			this.pursuers.removeIf(mob -> !mob.isAlive() || mob.isRemoved() || mob.level() != level || mob.distanceToSqr(bunnay) > farSqr);
+			// It can only run when it is free to, and only starts when it is scared; once running it carries on.
+			if (!bunnay.canRunNow() || !(bunnay.isScared() || bunnay.isFleeing())) {
+				this.pursuers.clear();
 			} else {
-				brain.eraseMemory(BunnayAi.FLEE_THREAT_CENTER);
-				brain.eraseMemory(BunnayAi.FLEE_AWAY);
+				this.pursuers.addAll(bunnay.findThreats());
+			}
+			List<Mob> threats = List.copyOf(this.pursuers);
+			bunnay.debugThreats(threats);
+			Mob nearest = threats.stream().min(java.util.Comparator.comparingDouble(bunnay::distanceToSqr)).orElse(null);
+			if (nearest != null) {
+				brain.setMemory(MemoryModuleType.AVOID_TARGET, nearest);
+			} else {
+				brain.eraseMemory(MemoryModuleType.AVOID_TARGET);
 			}
 		}
 	}
