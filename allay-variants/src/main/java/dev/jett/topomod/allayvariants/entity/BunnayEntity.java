@@ -110,14 +110,10 @@ public class BunnayEntity extends TamableAnimal {
 	static final int HOP_SEARCH_RADIUS = 4;
 	static final int HOP_MAX_RISE = 3;
 	static final int HOP_MAX_DROP = 3;
-	/** A spot is one it could not walk to if no path of this many blocks reaches it (the frog's test uses 8; 4 is being tried). */
-	static final int HOP_WALK_CHECK_LENGTH = 4;
-	/** A hop has to bring it at least this much closer to where it is going (or the threat this much further away), by effort. */
-	static final double HOP_MIN_DISTANCE = 8.0;
+	/** A spot is one it could not walk to if no path of this many blocks reaches it (the frog's test uses 8 too). */
+	static final int HOP_WALK_CHECK_LENGTH = 8;
 	/** The shortest hop, sideways (from the middle of the spot), so that aiming short of it does not aim behind it. */
 	static final double HOP_MIN_HORIZONTAL = 0.75;
-	/** Each block of climbing counts as this many extra blocks of distance when judging a hop (see effort). */
-	static final double CLIMB_COST = 2.0;
 	/** The wait after a hop, in ticks: 40, which is 2 seconds (testing; the frog waits 100 to 140). */
 	static final int HOP_COOLDOWN_MIN = 40;
 	static final int HOP_COOLDOWN_RANGE = 1;
@@ -637,15 +633,6 @@ public class BunnayEntity extends TamableAnimal {
 		);
 	}
 
-	/**
-	 * How hard it is to get from one place to another: the distance, plus CLIMB_COST blocks for each block that has to be
-	 * climbed (dropping is free). Hops are judged by it everywhere: how much closer a landing is to where it is going, or (when
-	 * running from something) how much further the threat is from the landing.
-	 */
-	static double effort(Vec3 from, Vec3 to) {
-		return from.distanceTo(to) + CLIMB_COST * Math.max(0.0, to.y - from.y);
-	}
-
 	void beginEating(ItemStack stack) {
 		this.eatTicks = 0;
 		this.entityData.set(DATA_EATING_FOOD, stack.copyWithCount(1));
@@ -1137,19 +1124,22 @@ public class BunnayEntity extends TamableAnimal {
 	record HopReason(String name, ToDoubleFunction<Vec3> cost, double maxCost) {
 	}
 
-	/** To get away from a point: the landing the hardest for it to reach, and at least HOP_MIN_DISTANCE harder than where it is now. */
+	/** To get away from a point: the landing the furthest from it, and no nearer to it than it is now (the rule a flee's walk picks follow). */
 	private HopReason awayFrom(Vec3 point, String name) {
-		double now = effort(point, this.position());
+		double now = point.distanceTo(this.position());
 		return new HopReason(name, landing -> {
-			double away = effort(point, landing);
-			return away < now + HOP_MIN_DISTANCE ? Double.MAX_VALUE : -away;
+			double away = point.distanceTo(landing);
+			return away < now ? Double.MAX_VALUE : -away;
 		}, Double.MAX_VALUE / 2.0);
 	}
 
-	/** To get nearer a point: the landing the least effort from it, and at least HOP_MIN_DISTANCE less than from here. It does not land on it. */
+	/** To get nearer a point: the landing the nearest to it, and no further from it than it is now. It does not land on it. */
 	private HopReason toward(Vec3 goal, String name) {
-		double now = effort(this.position(), goal);
-		return new HopReason(name, landing -> landing.distanceTo(goal) < 1.2 ? Double.MAX_VALUE : effort(landing, goal), now - HOP_MIN_DISTANCE);
+		double now = goal.distanceTo(this.position());
+		return new HopReason(name, landing -> {
+			double left = goal.distanceTo(landing);
+			return left < 1.2 || left > now ? Double.MAX_VALUE : left;
+		}, Double.MAX_VALUE / 2.0);
 	}
 
 	/**
