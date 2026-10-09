@@ -70,11 +70,15 @@ final class BunnaySensors {
 	/**
 	 * Keeps track of the mobs a scared bunnay runs from, and says which is the nearest (the AVOID_TARGET the flee goes by). A mob
 	 * joins when it is after the bunnay (has it as its target) within FLEE_SEARCH_RADIUS while the bunnay is scared, and stays until
-	 * it is dead or gone or the bunnay is further than FLEE_SEARCH_RADIUS from it. So the bunnay keeps running until it is that far
-	 * from every one of them, even once it is back above the health that made it run.
+	 * it is dead or gone, the bunnay is further than FLEE_SEARCH_RADIUS from it, or it has not been after the bunnay for
+	 * LOST_INTEREST_TICKS. So the bunnay keeps running, even once it is back above the health that made it run, until nothing has
+	 * been after it for 5 seconds.
 	 */
 	static final class Threats extends Sensor<BunnayEntity> {
-		private final Set<Mob> pursuers = new java.util.HashSet<>();
+		private static final int LOST_INTEREST_TICKS = 100;
+
+		/** Each pursuer, and the last time it was seen after the bunnay. */
+		private final java.util.Map<Mob, Long> pursuers = new java.util.HashMap<>();
 
 		Threats() {
 			super(5);
@@ -89,14 +93,18 @@ final class BunnaySensors {
 		protected void doTick(ServerLevel level, BunnayEntity bunnay) {
 			Brain<BunnayEntity> brain = bunnay.getBrain();
 			double farSqr = BunnayEntity.FLEE_SEARCH_RADIUS * BunnayEntity.FLEE_SEARCH_RADIUS;
-			this.pursuers.removeIf(mob -> !mob.isAlive() || mob.isRemoved() || mob.level() != level || mob.distanceToSqr(bunnay) > farSqr);
+			long now = level.getGameTime();
+			this.pursuers.keySet().removeIf(mob -> !mob.isAlive() || mob.isRemoved() || mob.level() != level || mob.distanceToSqr(bunnay) > farSqr);
 			// It can only run when it is free to, and only starts when it is scared; once running it carries on.
 			if (!bunnay.canRunNow() || !(bunnay.isScared() || bunnay.isFleeing())) {
 				this.pursuers.clear();
 			} else {
-				this.pursuers.addAll(bunnay.findThreats());
+				for (Mob mob : bunnay.findThreats()) {
+					this.pursuers.put(mob, now);
+				}
+				this.pursuers.values().removeIf(last -> now - last > LOST_INTEREST_TICKS);
 			}
-			List<Mob> threats = List.copyOf(this.pursuers);
+			List<Mob> threats = List.copyOf(this.pursuers.keySet());
 			bunnay.debugThreats(threats);
 			Mob nearest = threats.stream().min(java.util.Comparator.comparingDouble(bunnay::distanceToSqr)).orElse(null);
 			if (nearest != null) {
