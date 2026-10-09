@@ -113,7 +113,7 @@ public class BunnayEntity extends TamableAnimal {
 	/** A spot is one it could not walk to if no path of this many blocks reaches it (the frog's test uses 8; 4 is being tried). */
 	static final int HOP_WALK_CHECK_LENGTH = 4;
 	/** A hop has to bring it at least this much closer to where it is going (or the threat this much further away), by effort. */
-	static final double HOP_MIN_DISTANCE = 5.0;
+	static final double HOP_MIN_DISTANCE = 8.0;
 	/** The shortest hop, sideways (from the middle of the spot), so that aiming short of it does not aim behind it. */
 	static final double HOP_MIN_HORIZONTAL = 0.75;
 	/** Each block of climbing counts as this many extra blocks of distance when judging a hop (see effort). */

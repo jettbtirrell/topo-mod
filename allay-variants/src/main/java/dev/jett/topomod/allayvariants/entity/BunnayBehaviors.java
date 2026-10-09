@@ -8,7 +8,6 @@ import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Mth;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
@@ -432,27 +431,7 @@ final class BunnayBehaviors {
 		/** How far it picks a place to run to, sideways and up or down (the rabbit's is 16 and 7; a bunnay can only path about 16 blocks). */
 		private static final int PICK_RANGE = 12;
 		private static final int PICK_HEIGHT = 7;
-		/**
-		 * The high ground: when it is this many blocks above what it runs from (in a tree, on a cliff), the ground mobs cannot get
-		 * to it, so it does not run to anywhere more than HIGH_GROUND_DROP lower than it stands. If that leaves nowhere, it stays.
-		 */
-		private static final double HIGH_GROUND_RISE = 2.0;
-		private static final double HIGH_GROUND_DROP = 1.0;
 		private int retryDelay;
-
-		/** Whether a path gets all the way there without going lower than this. */
-		private static boolean staysHigh(Path path, double lowest) {
-			if (!path.canReach()) {
-				return false;
-			}
-			int floor = Mth.floor(lowest);
-			for (int i = 0; i < path.getNodeCount(); i++) {
-				if (path.getNodePos(i).getY() < floor) {
-					return false;
-				}
-			}
-			return true;
-		}
 
 		FleeFromThreat() {
 			super(Set.of(MemoryModuleType.AVOID_TARGET, MemoryModuleType.WALK_TARGET, BunnayAi.HOP_TARGET, MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS,
@@ -468,14 +447,9 @@ final class BunnayBehaviors {
 				return false;
 			}
 			Vec3 avoid = threat.position();
-			boolean highGround = bunnay.getY() - threat.getY() >= HIGH_GROUND_RISE;
-			double lowest = bunnay.getY() - HIGH_GROUND_DROP;
 			boolean canHop = bunnay.canHopNow() && !brain.hasMemoryValue(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS);
 			if (canHop && bunnay.getRandom().nextBoolean()) {
 				List<BunnayEntity.Hop> hops = bunnay.hopsAwayFrom(avoid, HOP_CANDIDATES);
-				if (highGround) {
-					hops = hops.stream().filter(hop -> hop.landing().y >= lowest).toList();
-				}
 				if (!hops.isEmpty()) {
 					BunnayEntity.Hop pick = hops.get(bunnay.getRandom().nextInt(hops.size()));
 					brain.setMemoryWithExpiry(BunnayAi.HOP_TARGET, BlockPos.containing(pick.landing()), 20L);
@@ -488,20 +462,18 @@ final class BunnayBehaviors {
 			int pathChecks = 0;
 			for (int attempt = 0; attempt < SAMPLES && pathChecks < MAX_PATH_CHECKS; attempt++) {
 				Vec3 spot = LandRandomPos.getPosAway(bunnay, PICK_RANGE, PICK_HEIGHT, avoid);
-				if (spot == null || avoid.distanceToSqr(spot) < nowSqr || (highGround && spot.y < lowest)) {
+				if (spot == null || avoid.distanceToSqr(spot) < nowSqr) {
 					continue;
 				}
 				pathChecks++;
-				Path path = bunnay.getNavigation().createPath(spot.x, spot.y, spot.z, 0);
-				// On the high ground the whole way there has to stay up: a partial path to somewhere it cannot reach, say, goes down.
-				if (path != null && (!highGround || staysHigh(path, lowest))) {
+				if (bunnay.getNavigation().createPath(spot.x, spot.y, spot.z, 0) != null) {
 					brain.setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(spot, BunnayEntity.FLEE_SPEED, 0));
 					bunnay.debugLog("flee pick: run to %s (%.1f blocks from here, %d path check(s))", spot, spot.distanceTo(bunnay.position()), pathChecks);
 					return true;
 				}
 			}
 			this.retryDelay = RETRY_TICKS;
-			bunnay.debugLog("flee pick: nowhere to go%s, waiting %d ticks", highGround ? " (holding the high ground)" : "", RETRY_TICKS);
+			bunnay.debugLog("flee pick: nowhere to go, waiting %d ticks", RETRY_TICKS);
 			return false;
 		}
 	}
