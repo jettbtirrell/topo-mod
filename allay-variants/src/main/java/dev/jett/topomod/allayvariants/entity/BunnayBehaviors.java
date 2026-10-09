@@ -1,6 +1,5 @@
 package dev.jett.topomod.allayvariants.entity;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +32,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.Team;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.schedule.Activity;
 
 // The bunnay's own behaviours. Everything that walks it somewhere does it the way the vanilla ones do: it sets the walk target and
