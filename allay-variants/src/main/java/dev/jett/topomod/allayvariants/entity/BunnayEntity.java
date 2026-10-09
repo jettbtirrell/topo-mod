@@ -79,7 +79,6 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 
 import org.jspecify.annotations.Nullable;
@@ -296,12 +295,6 @@ public class BunnayEntity extends TamableAnimal {
 	private @Nullable BlockPos jukeboxPos;
 	/** Listens for the note blocks that tune it in (see FARM_FORGET_TICKS); the one it is tuned in to is a Brain memory. */
 	private final DynamicGameEventListener<NoteBlockListener> dynamicNoteBlockListener;
-	/** DEBUG-TEMP: the tick the last hop ended, to log what happens just after it while fleeing. */
-	int lastHopEndTick = -1000;
-	/** DEBUG-TEMP: writes what the hops, the flee and the fights are doing to the game log (lines starting [bunnay). /bunnay log toggles it. */
-	public static volatile boolean debugLogging = true;
-	/** DEBUG-TEMP: marks the landing spots a hop scan looks at with coloured sparks (see glowSpot). /bunnay glow toggles it. */
-	public static volatile boolean debugGlow = true;
 
 	public BunnayEntity(EntityType<? extends BunnayEntity> type, Level level) {
 		super(type, level);
@@ -455,8 +448,6 @@ public class BunnayEntity extends TamableAnimal {
 
 	@Override
 	protected void customServerAiStep(ServerLevel level) {
-		// DEBUG: the hop made by /bunnay hop flies at the same point of the tick the Brain's hops do.
-		this.debugHopRun.tick();
 		this.getBrain().tick(level, this);
 		BunnayAi.updateActivity(this);
 		this.setAggressive(this.hasLiveTarget());
@@ -842,12 +833,6 @@ public class BunnayEntity extends TamableAnimal {
 			if (this.getNavigation().isInProgress()) {
 				this.shortenJumpDelay(STEP_JUMP_DELAY);
 			}
-			if (debugLogging && this.tickCount % 20 == 0 && (this.getTarget() != null || this.isFleeing() || this.hopReason() != null)) {
-				this.debugStatus();
-			}
-			if (debugLogging && this.isFleeing() && this.tickCount - this.lastHopEndTick <= 40) {
-				this.debugAfterHop();
-			}
 			if ((this.isScared() || this.isFleeing()) && this.getTarget() != null) {
 				this.setTarget(null);
 			}
@@ -997,22 +982,6 @@ public class BunnayEntity extends TamableAnimal {
 		}
 	}
 
-	// DEBUG: a hop run that only TopoDebugCommand uses. Remove together with that command.
-	final HopRun debugHopRun = new HopRun(this);
-
-	/** DEBUG: hops away from the given point. False if it cannot hop right now. */
-	public boolean debugHop(Vec3 awayFrom) {
-		if (!this.canHopNow() || this.debugHopRun.running) {
-			return false;
-		}
-		Hop plan = this.hopAwayFrom(awayFrom);
-		if (plan == null) {
-			return false;
-		}
-		this.debugHopRun.start(plan);
-		return true;
-	}
-
 	/** How many ticks the current hop spends in the air (see DATA_HOP_AIR_TICKS). */
 	public int getHopAirTicks() {
 		return this.entityData.get(DATA_HOP_AIR_TICKS);
@@ -1034,128 +1003,25 @@ public class BunnayEntity extends TamableAnimal {
 			&& !this.isDancing() && !this.isInSittingPose();
 	}
 
-	// ---- DEBUG-TEMP logging ----
-
-	void debugLog(String message, Object... args) {
-		if (debugLogging) {
-			AllayVariantsMod.LOGGER.info("[bunnay {} t{}] {}", this.getId(), this.tickCount, String.format(message, args));
-		}
-	}
-
-	private static String at(Vec3 v) {
-		return String.format("(%.2f, %.2f, %.2f)", v.x, v.y, v.z);
-	}
-
-	private double lastThreatDistance = -1.0;
-	private final java.util.Map<Integer, Mob> lastThreats = new java.util.HashMap<>();
-
-	/** DEBUG-TEMP: called with whatever is after it each time it looks; says why anything that was has stopped. */
-	void debugThreats(List<Mob> threats) {
-		if (!debugLogging) {
-			return;
-		}
-		java.util.Set<Integer> now = new java.util.HashSet<>();
-		threats.forEach(mob -> now.add(mob.getId()));
-		this.lastThreats.entrySet().removeIf(entry -> {
-			if (now.contains(entry.getKey())) {
-				return false;
-			}
-			Mob mob = entry.getValue();
-			LivingEntity target = mob.getTarget();
-			this.debugLog("threat DROPPED: %s alive=%s dist=%.1f | its target now: %s | it can see me: %s | I can see it: %s | its follow range %.0f",
-				mob.getType().getDescriptionId(), mob.isAlive(), this.distanceTo(mob),
-				target == null ? "nothing" : target.getType().getDescriptionId() + (target == this ? " (me)" : "") + " at " + String.format("%.1f", mob.distanceTo(target)),
-				mob.hasLineOfSight(this), this.hasLineOfSight(mob), mob.getAttributeValue(Attributes.FOLLOW_RANGE));
-			return true;
-		});
-		threats.forEach(mob -> this.lastThreats.putIfAbsent(mob.getId(), mob));
-	}
-
 	/**
-	 * DEBUG-TEMP: every tick for 2 seconds after a hop ends while it flees: what is holding it, and when it starts moving again.
+	 * What a hop is for, as a score for each landing spot (lower is better, Double.MAX_VALUE meaning it is no use): to get nearer a
+	 * point, the nearest to it, and no further from it than it is now. It does not land on it.
 	 */
-	private void debugAfterHop() {
-		Brain<BunnayEntity> brain = this.getBrain();
-		Vec3 motion = this.getDeltaMovement();
-		this.debugLog("after hop +%d: ground=%s hopping=%s | walkTarget=%s midJump=%s hopCooldown=%d | nav inProgress=%s | speed %.3f b/tick",
-			this.tickCount - this.lastHopEndTick, this.onGround(), this.isHopping(), brain.hasMemoryValue(MemoryModuleType.WALK_TARGET),
-			brain.hasMemoryValue(MemoryModuleType.LONG_JUMP_MID_JUMP),
-			brain.getMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS).orElse(0), this.getNavigation().isInProgress(), Math.hypot(motion.x, motion.z));
-	}
-
-	/** DEBUG-TEMP: once a second while it has something to do: its state, and how it is doing against what is after it. */
-	private void debugStatus() {
-		LivingEntity target = this.getTarget();
-		Path path = this.getNavigation().getPath();
-		Vec3 motion = this.getDeltaMovement();
-		this.debugLog("status: at %s activity=%s hp=%.1f/%.1f fleeing=%s | speed=%.2f horizontal=%.2f b/tick | hop: cooldown=%d canHopNow=%s reason=%s (ground=%s water=%s eating=%s dancing=%s sitting=%s hopping=%s) | nav: inProgress=%s path=%s",
-			at(this.position()), this.getBrain().getActiveNonCoreActivity().map(Object::toString).orElse("?"),
-			this.getHealth(), this.getMaxHealth(), this.isFleeing(),
-			this.getSpeed(), Math.hypot(motion.x, motion.z),
-			this.getBrain().getMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS).orElse(0), this.canHopNow(),
-			this.hopReason() == null ? "none" : this.hopReason().name(),
-			this.onGround(), this.isInWater(), this.isEating(), this.isDancing(), this.isInSittingPose(), this.isHopping(),
-			this.getNavigation().isInProgress(),
-			path == null ? "none" : "nodes=" + path.getNodeCount() + " next=" + path.getNextNodeIndex() + " reach=" + path.canReach() + " done=" + path.isDone());
-		if (this.isFleeing()) {
-			List<Mob> threats = this.findThreats();
-			double nearest = threats.stream().mapToDouble(this::distanceTo).min().orElse(-1.0);
-			this.debugLog("flee: %d threats, nearest %.1f blocks (%s since last look), %s", threats.size(), nearest,
-				this.lastThreatDistance < 0 || nearest < 0 ? "-" : String.format("%+.1f", nearest - this.lastThreatDistance),
-				threats.stream().limit(3).map(mob -> mob.getType().getDescriptionId() + "@" + String.format("%.1f", this.distanceTo(mob))).toList());
-			this.lastThreatDistance = nearest;
-		} else {
-			this.lastThreatDistance = -1.0;
-		}
-		if (target != null) {
-			this.debugLog("target: %s dist=%.2f dy=%.2f inMeleeRange=%s lineOfSight=%s", target.getType().getDescriptionId(), this.distanceTo(target),
-				target.getY() - this.getY(), this.isWithinMeleeAttackRange(target), this.getSensing().hasLineOfSight(target));
-		}
-	}
-
-	/** What a hop is for: how good a landing spot is (lower is better), with Double.MAX_VALUE meaning it is no use for the reason. */
-	record HopReason(String name, ToDoubleFunction<Vec3> cost) {
-	}
-
-	/** To get away from a point: the landing the furthest from it, and no nearer to it than it is now (the rule a flee's walk picks follow). */
-	private HopReason awayFrom(Vec3 point, String name) {
-		double now = point.distanceTo(this.position());
-		return new HopReason(name, landing -> {
-			double away = point.distanceTo(landing);
-			return away < now ? Double.MAX_VALUE : -away;
-		});
-	}
-
-	/** To get nearer a point: the landing the nearest to it, and no further from it than it is now. It does not land on it. */
-	private HopReason toward(Vec3 goal, String name) {
+	private ToDoubleFunction<Vec3> toward(Vec3 goal) {
 		double now = goal.distanceTo(this.position());
-		return new HopReason(name, landing -> {
+		return landing -> {
 			double left = goal.distanceTo(landing);
 			return left < 1.2 || left > now ? Double.MAX_VALUE : left;
-		});
+		};
 	}
 
 	/**
-	 * Why it would hop now, if it has a reason: it is going somewhere (it has a walk target, which is what following, tempting,
-	 * chasing, fetching, fleeing and wandering all set). Nothing else is a reason: it does not hop about for the sake of it.
+	 * A hop toward where it is going, or null. It only hops with somewhere to go (a walk target, which is what following, tempting,
+	 * chasing, fetching, fleeing and wandering all set): it does not hop about for the sake of it. Null too if the search finds nowhere.
 	 */
-	@Nullable HopReason hopReason() {
+	@Nullable Hop planHop() {
 		WalkTarget walk = this.getBrain().getMemory(MemoryModuleType.WALK_TARGET).orElse(null);
-		if (walk != null) {
-			return this.toward(walk.getTarget().currentPosition(), "toward where it is going");
-		}
-		return null;
-	}
-
-	/** A hop for the reason it has (see HopSearch), or null if it has none or finds nowhere. */
-	@Nullable Hop planReasonedHop() {
-		HopReason reason = this.hopReason();
-		return reason == null ? null : new HopSearch(reason).find();
-	}
-
-	/** A hop that gets it away from a point (for the flee, and the debug command), or null. */
-	@Nullable Hop hopAwayFrom(Vec3 point) {
-		return new HopSearch(this.awayFrom(point, "running away")).find();
+		return walk == null ? null : new HopSearch(this.toward(walk.getTarget().currentPosition())).find();
 	}
 
 	/**
@@ -1165,20 +1031,19 @@ public class BunnayEntity extends TamableAnimal {
 	 * is the best hop there is, and nothing worse is looked at. A search that finds nothing starts the half-length cooldown.
 	 */
 	final class HopSearch {
-		private final HopReason reason;
+		private final ToDoubleFunction<Vec3> cost;
 		private final List<BlockPos> candidates = new ArrayList<>();
 		private int next;
-		private int tries;
 
-		HopSearch(HopReason reason) {
-			this.reason = reason;
+		HopSearch(ToDoubleFunction<Vec3> cost) {
+			this.cost = cost;
 			BlockPos feet = BunnayEntity.this.blockPosition();
 			for (int dx = -HOP_SEARCH_RADIUS; dx <= HOP_SEARCH_RADIUS; dx++) {
 				for (int dz = -HOP_SEARCH_RADIUS; dz <= HOP_SEARCH_RADIUS; dz++) {
 					for (int dy = -HOP_MAX_DROP; dy <= HOP_MAX_RISE; dy++) {
 						BlockPos cell = feet.offset(dx, dy, dz);
 						Vec3 landing = Vec3.atBottomCenterOf(cell);
-						if ((dx != 0 || dz != 0) && reason.cost().applyAsDouble(landing) < Double.MAX_VALUE) {
+						if ((dx != 0 || dz != 0) && cost.applyAsDouble(landing) < Double.MAX_VALUE) {
 							this.candidates.add(cell);
 						}
 					}
@@ -1187,16 +1052,12 @@ public class BunnayEntity extends TamableAnimal {
 			// Best for the reason first (nearest the goal, or furthest from what it runs from); the shuffle first so that places equally good
 			// are not always tried in the same order.
 			Collections.shuffle(this.candidates, new java.util.Random(BunnayEntity.this.getRandom().nextLong()));
-			this.candidates.sort(Comparator.comparingDouble(cell -> reason.cost().applyAsDouble(Vec3.atBottomCenterOf(cell))));
+			this.candidates.sort(Comparator.comparingDouble(cell -> cost.applyAsDouble(Vec3.atBottomCenterOf(cell))));
 		}
 
 		/** Out of places. */
 		private boolean done() {
 			return this.next >= this.candidates.size();
-		}
-
-		int tries() {
-			return this.tries;
 		}
 
 		/** One try: the next place, furthest first, that it could stand on. The hop to it if an arc works and it cannot be walked to, else null. */
@@ -1208,18 +1069,8 @@ public class BunnayEntity extends TamableAnimal {
 			if (landing == null) {
 				return null;
 			}
-			this.tries++;
 			Hop hop = BunnayEntity.this.jumpTo(landing);
-			double cost = this.reason.cost().applyAsDouble(landing);
-			if (hop == null) {
-				BunnayEntity.this.debugTry(this, landing, cost, "arc: none");
-				BunnayEntity.this.glowSpot(landing, 0xFF2020, 4);
-				return null;
-			}
-			boolean canWalk = BunnayEntity.this.canWalkTo(landing);
-			BunnayEntity.this.debugTry(this, landing, cost, "arc: ok, walkable: " + canWalk);
-			BunnayEntity.this.glowSpot(landing, canWalk ? 0xFFD000 : 0x20FF20, canWalk ? 4 : 9);
-			return canWalk ? null : hop;
+			return hop == null || BunnayEntity.this.canWalkTo(landing) ? null : hop;
 		}
 
 		/** All the tries at once, stopping at the first hop. */
@@ -1230,52 +1081,9 @@ public class BunnayEntity extends TamableAnimal {
 					return hop;
 				}
 			}
-			BunnayEntity.this.debugLog("hop search (%s): nothing found in %d tries", this.reason.name(), this.tries);
 			BunnayEntity.this.startFailedHopCooldown();
 			return null;
 		}
-
-		String reasonName() {
-			return this.reason.name();
-		}
-	}
-
-	/** DEBUG-TEMP: one line for each place a search tries. */
-	private void debugTry(HopSearch search, Vec3 landing, double cost, String note) {
-		if (debugLogging) {
-			AllayVariantsMod.LOGGER.info(this.describeSpot("#" + search.tries(), landing, cost, note + " | " + search.reasonName()));
-		}
-	}
-
-	/**
-	 * DEBUG-TEMP: marks a spot with a column of coloured dust, taller for a better rank. Green is a hop it can make, yellow a spot an
-	 * arc reached but that could be walked to, red a spot no arc reaches.
-	 */
-	private void glowSpot(Vec3 spot, int color, int height) {
-		if (debugGlow && this.level() instanceof ServerLevel server) {
-			for (int i = 0; i < height; i++) {
-				server.sendParticles(new net.minecraft.core.particles.DustParticleOptions(color, 1.1F), spot.x, spot.y + 0.1 + 0.3 * i, spot.z, 1, 0.04, 0.0, 0.04, 0.0);
-			}
-		}
-	}
-
-	/** DEBUG-TEMP: one line about a landing spot: how high, how far from the bunnay and from its owner, and what it costs. */
-	/** DEBUG-TEMP: what a block is and how tall its collision shape is, to see whether a floor is the full block a hop assumes. */
-	private String describeBlock(BlockPos pos) {
-		BlockState state = this.level().getBlockState(pos);
-		VoxelShape shape = state.getCollisionShape(this.level(), pos);
-		return String.format("%s at %s (collision top %s, so its surface is y=%s)", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()), pos.toShortString(),
-			shape.isEmpty() ? "none" : String.format("%.4f", shape.max(net.minecraft.core.Direction.Axis.Y)),
-			shape.isEmpty() ? "-" : String.format("%.4f", pos.getY() + shape.max(net.minecraft.core.Direction.Axis.Y)));
-	}
-
-	private String describeSpot(String label, Vec3 landing, double cost, String note) {
-		Vec3 here = this.position();
-		LivingEntity owner = this.getOwner();
-		return String.format("    %-4s %s %+.0f up, %.1f from the bunnay, %s from you | cost %.1f | %s | floor: " + this.describeBlock(BlockPos.containing(landing).below()), label, at(landing), landing.y - here.y,
-			Math.hypot(landing.x - here.x, landing.z - here.z),
-			owner == null ? "?" : String.format("%.1f", Math.hypot(landing.x - owner.getX(), landing.z - owner.getZ())) + " (" + String.format("%+.0f", landing.y - owner.getY()) + " up)",
-			cost, note);
 	}
 
 	/** The frog's test of a spot: there is no way to walk there, by a path of HOP_WALK_CHECK_LENGTH blocks. */
@@ -1565,8 +1373,6 @@ public class BunnayEntity extends TamableAnimal {
 		if (this.isInvulnerableTo(level, source)) {
 			return false;
 		}
-		this.debugLog("hurt by %s (%s) for %.1f at %s%s", source.getEntity() == null ? "nothing" : source.getEntity().getType().getDescriptionId(),
-			source.type().msgId(), damage, at(this.position()), this.isHopping() ? " WHILE HOPPING" : "");
 		if (this.isOrderedToSit()) {
 			this.setOrderedToSit(false);
 		}
@@ -1646,9 +1452,6 @@ public class BunnayEntity extends TamableAnimal {
 		private Hop hop;
 		private int ticks;
 		boolean running;
-		// DEBUG-TEMP: where it started and how it flew, to explain a miss.
-		private Vec3 launchFrom = Vec3.ZERO;
-		private final List<String> trace = new ArrayList<>();
 
 		HopRun(BunnayEntity bunnay) {
 			this.bunnay = bunnay;
@@ -1657,13 +1460,10 @@ public class BunnayEntity extends TamableAnimal {
 		void start(Hop hop) {
 			this.hop = hop;
 			this.ticks = 0;
-			this.trace.clear();
 			this.running = true;
 			this.bunnay.getNavigation().stop();
 			this.bunnay.entityData.set(DATA_HOP_AIR_TICKS, hop.airTicks());
 			this.bunnay.entityData.set(DATA_HOPPING, true);
-			this.bunnay.debugLog("hop START from %s toward %s, launch velocity %s, ~%d ticks", at(this.bunnay.position()), at(hop.landing()), at(hop.velocity()), hop.airTicks());
-			this.bunnay.debugLog("hop aims at floor %s", this.bunnay.describeBlock(BlockPos.containing(hop.landing()).below()));
 		}
 
 		void tick() {
@@ -1671,14 +1471,6 @@ public class BunnayEntity extends TamableAnimal {
 				return;
 			}
 			this.ticks++;
-			if (debugLogging && this.ticks > 1) {
-				int t = this.ticks - 1;
-				Vec3 v = this.hop.velocity();
-				Vec3 now = this.bunnay.position();
-				Vec3 plan = this.launchFrom.add(v.x * t, v.y * t - this.bunnay.getGravity() * t * (t - 1) / 2.0, v.z * t);
-				this.trace.add(String.format("    after %d: at %s expected %s (off %+.2f %+.2f %+.2f) ground=%s", t, at(now), at(plan), now.x - plan.x, now.y - plan.y,
-					now.z - plan.z, this.bunnay.onGround()));
-			}
 			if (this.ticks == 1) {
 				// Off at once, facing where it is going.
 				Vec3 velocity = this.hop.velocity();
@@ -1689,7 +1481,6 @@ public class BunnayEntity extends TamableAnimal {
 				this.bunnay.setHopYaw(yaw);
 				this.bunnay.setDiscardFriction(true);
 				this.bunnay.setDeltaMovement(velocity);
-				this.launchFrom = this.bunnay.position();
 				this.bunnay.needsSync = true;
 				this.bunnay.playSound(SoundEvents.RABBIT_JUMP, 1.0F, 1.0F);
 			} else if (this.bunnay.onGround()) {
@@ -1710,26 +1501,6 @@ public class BunnayEntity extends TamableAnimal {
 			this.bunnay.setHopYaw(Float.NaN);
 			this.bunnay.setDiscardFriction(false);
 			this.bunnay.entityData.set(DATA_HOPPING, false);
-			this.bunnay.lastHopEndTick = this.bunnay.tickCount;
-			double off = this.bunnay.position().distanceTo(this.hop.landing());
-			this.bunnay.debugLog("hop END at %s after %d ticks (aimed at %s, %.2f away, %.2f across %+.2f up)", at(this.bunnay.position()), this.ticks, at(this.hop.landing()), off,
-				Math.hypot(this.bunnay.getX() - this.hop.landing().x, this.bunnay.getZ() - this.hop.landing().z), this.bunnay.getY() - this.hop.landing().y);
-			this.bunnay.debugLog("hop came down on %s", this.bunnay.describeBlock(this.bunnay.getOnPos()));
-			if (debugLogging && off > 1.0) {
-				this.bunnay.debugLog("hop MISSED by %.2f, tick by tick against the arc it launched on:", off);
-				this.trace.forEach(line -> AllayVariantsMod.LOGGER.info(line));
-			}
-			// DEBUG-TEMP: tell the players nearby how far the hop went, from where it left the ground to where it came down.
-			if (debugLogging && this.ticks > 1 && this.bunnay.level() instanceof ServerLevel serverLevel) {
-				Vec3 end = this.bunnay.position();
-				Component message = Component.literal(String.format("[bunnay %d] hopped %.2f blocks (%.2f across, %+.2f up)", this.bunnay.getId(), end.distanceTo(this.launchFrom),
-					Math.hypot(end.x - this.launchFrom.x, end.z - this.launchFrom.z), end.y - this.launchFrom.y));
-				for (ServerPlayer player : serverLevel.players()) {
-					if (player.distanceToSqr(this.bunnay) < 64.0 * 64.0) {
-						player.sendSystemMessage(message);
-					}
-				}
-			}
 			this.bunnay.startHopCooldown();
 		}
 	}

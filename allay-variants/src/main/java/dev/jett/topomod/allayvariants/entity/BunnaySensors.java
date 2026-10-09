@@ -13,7 +13,6 @@ import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.Sensor;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.phys.Vec3;
 
 // The bunnay's own sensors. The combat one looks every tick (a hit has to count at once); the rest keep the old scan paces.
 final class BunnaySensors {
@@ -105,7 +104,6 @@ final class BunnaySensors {
 				this.pursuers.values().removeIf(last -> now - last > LOST_INTEREST_TICKS);
 			}
 			List<Mob> threats = List.copyOf(this.pursuers.keySet());
-			bunnay.debugThreats(threats);
 			Mob nearest = threats.stream().min(java.util.Comparator.comparingDouble(bunnay::distanceToSqr)).orElse(null);
 			if (nearest != null) {
 				brain.setMemory(MemoryModuleType.AVOID_TARGET, nearest);

@@ -127,7 +127,6 @@ final class BunnayBehaviors {
 				current = null;
 			}
 			if (current != null && this.tiredOfTrying(bunnay, current)) {
-				bunnay.debugLog("gave up on %s: no route, out of reach and no hit for %d ticks", current.getType().getDescriptionId(), GIVE_UP_TICKS);
 				bunnay.setTarget(null);
 				current = null;
 			}
@@ -186,7 +185,6 @@ final class BunnayBehaviors {
 		private void take(BunnayEntity bunnay, LivingEntity target, int importance) {
 			this.unreachableTicks = 0;
 			bunnay.setTarget(target);
-			bunnay.debugLog("took target %s (importance %d)", target.getType().getDescriptionId(), importance);
 			if (bunnay.getBrain().hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
 				this.priority = importance;
 				this.unseenTicks = 0;
@@ -230,7 +228,7 @@ final class BunnayBehaviors {
 
 	/**
 	 * The two halves of a hop, as in the frog's long jump: HopPrepare looks every so often (once the cooldown is over, and only
-	 * with a reason to hop: see BunnayEntity.hopReason) for a spot it could land on and not walk to, and starts the hop, setting
+	 * with somewhere to go: see BunnayEntity.planHop) for a spot it could land on and not walk to, and starts the hop, setting
 	 * the mid-jump memory, and HopMidJump flies it. There is no wind-up: the launch is on the very tick the hop is chosen.
 	 */
 	static final class HopPrepare extends Behavior<BunnayEntity> {
@@ -252,7 +250,7 @@ final class BunnayBehaviors {
 				return false;
 			}
 			// Looking for somewhere to land is only done with a reason to hop (the cooldown, including the short one after finding nowhere, is a start condition).
-			this.plan = bunnay.planReasonedHop();
+			this.plan = bunnay.planHop();
 			return this.plan != null;
 		}
 
@@ -403,9 +401,9 @@ final class BunnayBehaviors {
 		private static final int RETRY_TICKS = 5;
 		/** How many random places it tries for one to run to (vanilla's SetWalkTargetAwayFrom tries 10), and how many of those it looks for a path to in a tick. */
 		private static final int SAMPLES = 30;
-		private static final int MAX_PATH_CHECKS = 5;
+		private static final int MAX_PATH_CHECKS = 4;
 		/** How far it picks a place to run to, sideways and up or down (the rabbit's is 16 and 7; a bunnay can only path about 16 blocks). */
-		private static final int PICK_RANGE = 12;
+		private static final int PICK_RANGE = 14;
 		private static final int PICK_HEIGHT = 7;
 		private int retryDelay;
 
@@ -433,12 +431,10 @@ final class BunnayBehaviors {
 				pathChecks++;
 				if (bunnay.getNavigation().createPath(spot.x, spot.y, spot.z, 0) != null) {
 					brain.setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(spot, BunnayEntity.FLEE_SPEED, 0));
-					bunnay.debugLog("flee pick: run to %s (%.1f blocks from here, %d path check(s))", spot, spot.distanceTo(bunnay.position()), pathChecks);
 					return true;
 				}
 			}
 			this.retryDelay = RETRY_TICKS;
-			bunnay.debugLog("flee pick: nowhere to go, waiting %d ticks", RETRY_TICKS);
 			return false;
 		}
 	}
