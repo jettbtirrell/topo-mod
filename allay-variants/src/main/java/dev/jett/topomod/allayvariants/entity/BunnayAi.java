@@ -62,8 +62,6 @@ public final class BunnayAi {
 	/** Set when it looked for ripe carrots and found none (what decides when to deliver). */
 	static final MemoryModuleType<Boolean> NO_CROPS_FOUND = registerMemory("no_crops_found", null);
 	static final MemoryModuleType<BlockPos> RIPE_CARROT = registerMemory("ripe_carrot", null);
-	/** A spot that something (the flee) has asked it to hop to; the hop behaviour carries it out when it can. */
-	static final MemoryModuleType<BlockPos> HOP_TARGET = registerMemory("hop_target", null);
 	static final MemoryModuleType<LivingEntity> OWNER_HURT_BY = registerMemory("owner_hurt_by", null);
 	static final MemoryModuleType<LivingEntity> OWNER_HURT_TARGET = registerMemory("owner_hurt_target", null);
 
@@ -98,7 +96,7 @@ public final class BunnayAi {
 		MemoryModuleType.BREED_TARGET, MemoryModuleType.ITEM_PICKUP_COOLDOWN_TICKS,
 		MemoryModuleType.NEAREST_LIVING_ENTITIES, MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES,
 		MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM, MemoryModuleType.LIKED_NOTEBLOCK_POSITION,
-		EAT_COOLDOWN, GIFT_COOLDOWN, DELIVER_COOLDOWN, NO_CROPS_FOUND, RIPE_CARROT, HOP_TARGET, OWNER_HURT_BY, OWNER_HURT_TARGET);
+		EAT_COOLDOWN, GIFT_COOLDOWN, DELIVER_COOLDOWN, NO_CROPS_FOUND, RIPE_CARROT, OWNER_HURT_BY, OWNER_HURT_TARGET);
 
 	private static final ImmutableList<SensorType<? extends Sensor<? super BunnayEntity>>> SENSORS = ImmutableList.of(
 		SensorType.NEAREST_LIVING_ENTITIES, SensorType.FOOD_TEMPTATIONS, COMBAT_SENSOR, THREATS_SENSOR, GROUND_CARROTS_SENSOR, RIPE_CARROTS_SENSOR);

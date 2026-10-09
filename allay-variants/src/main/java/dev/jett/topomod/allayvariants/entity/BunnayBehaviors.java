@@ -1,10 +1,11 @@
 package dev.jett.topomod.allayvariants.entity;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -19,6 +20,7 @@ import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
 import net.minecraft.world.entity.ai.behavior.BlockPosTracker;
 import net.minecraft.world.entity.ai.behavior.GoAndGiveItemsToTarget;
 import net.minecraft.world.entity.ai.behavior.OneShot;
+import net.minecraft.world.entity.ai.behavior.PositionTracker;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.MemoryStatus;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
@@ -229,12 +231,10 @@ final class BunnayBehaviors {
 	/**
 	 * The two halves of a hop, as in the frog's long jump: HopPrepare looks every so often (once the cooldown is over, and only
 	 * with a reason to hop: see BunnayEntity.hopReason) for a spot it could land on and not walk to, and starts the hop, setting
-	 * the mid-jump memory, and HopMidJump flies it. A spot some other behaviour has asked for (the HOP_TARGET memory, which the
-	 * flee uses) is tried first. There is no wind-up: the launch is on the very tick the hop is chosen.
+	 * the mid-jump memory, and HopMidJump flies it. There is no wind-up: the launch is on the very tick the hop is chosen.
 	 */
 	static final class HopPrepare extends Behavior<BunnayEntity> {
 		private final BunnayEntity.HopRun run;
-		private int scanDelay;
 		private BunnayEntity.Hop plan;
 
 		HopPrepare(BunnayEntity.HopRun run) {
@@ -242,40 +242,17 @@ final class BunnayBehaviors {
 				MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, MemoryStatus.VALUE_ABSENT,
 				MemoryModuleType.LONG_JUMP_MID_JUMP, MemoryStatus.VALUE_ABSENT,
 				MemoryModuleType.IS_PANICKING, MemoryStatus.VALUE_ABSENT,
-				BunnayAi.HOP_TARGET, MemoryStatus.REGISTERED,
 				MemoryModuleType.WALK_TARGET, MemoryStatus.REGISTERED), 2);
 			this.run = run;
 		}
 
 		@Override
 		protected boolean checkExtraStartConditions(ServerLevel level, BunnayEntity bunnay) {
-			Brain<BunnayEntity> brain = bunnay.getBrain();
 			if (!bunnay.canHopNow()) {
-				if (brain.hasMemoryValue(BunnayAi.HOP_TARGET)) {
-					bunnay.debugLog("hop asked for but it cannot hop right now (ground=%s hopping=%s), request still waiting", bunnay.onGround(), bunnay.isHopping());
-				}
-				this.scanDelay = 0;
 				return false;
 			}
-			BlockPos asked = brain.getMemory(BunnayAi.HOP_TARGET).orElse(null);
-			if (asked != null) {
-				brain.eraseMemory(BunnayAi.HOP_TARGET);
-				this.plan = bunnay.hopTo(Vec3.atBottomCenterOf(asked));
-				bunnay.debugLog("hop asked for at %s: %s", asked.toShortString(), this.plan != null ? "launching" : "no arc any more");
-				if (this.plan != null) {
-					return true;
-				}
-			}
-			// Looking for somewhere to land is only done with a reason to hop, and at a steady pace.
-			if (bunnay.hopReason() == null) {
-				this.scanDelay = 0;
-				return false;
-			}
-			if (--this.scanDelay > 0) {
-				return false;
-			}
+			// Looking for somewhere to land is only done with a reason to hop (the cooldown, including the short one after finding nowhere, is a start condition).
 			this.plan = bunnay.planReasonedHop();
-			this.scanDelay = this.plan == null ? BunnayEntity.HOP_RETRY_TICKS : BunnayEntity.HOP_SCAN_TICKS;
 			return this.plan != null;
 		}
 
@@ -418,13 +395,12 @@ final class BunnayBehaviors {
 	/**
 	 * Runs from what is after it, like a rabbit (this is vanilla's SetWalkTargetAwayFrom with one addition): when it has nowhere it is
 	 * already running to, it picks a random place up to 16 blocks away in the half-circle facing away from the threat and runs
-	 * there, and when it gets there it picks another. The addition: half the time, if there are places it could hop to and not
-	 * walk to, it picks one of those instead (the HOP_TARGET memory, which the hop behaviour carries out).
+	 * there, and when it gets there it picks another. (Hops are not the flee's business: running to a place is a walk target like
+	 * any other, and the hop behaviour hops toward it when it can.)
 	 */
 	static final class FleeFromThreat extends Instant {
 		/** After finding nowhere to go it waits this long before trying again. */
 		private static final int RETRY_TICKS = 5;
-		private static final int HOP_CANDIDATES = 6;
 		/** How many random places it tries for one to run to (vanilla's SetWalkTargetAwayFrom tries 10), and how many of those it looks for a path to in a tick. */
 		private static final int SAMPLES = 30;
 		private static final int MAX_PATH_CHECKS = 5;
@@ -434,29 +410,18 @@ final class BunnayBehaviors {
 		private int retryDelay;
 
 		FleeFromThreat() {
-			super(Set.of(MemoryModuleType.AVOID_TARGET, MemoryModuleType.WALK_TARGET, BunnayAi.HOP_TARGET, MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS,
-				MemoryModuleType.LONG_JUMP_MID_JUMP));
+			super(Set.of(MemoryModuleType.AVOID_TARGET, MemoryModuleType.WALK_TARGET, MemoryModuleType.LONG_JUMP_MID_JUMP));
 		}
 
 		@Override
 		public boolean trigger(ServerLevel level, BunnayEntity bunnay, long timestamp) {
 			Brain<BunnayEntity> brain = bunnay.getBrain();
 			LivingEntity threat = brain.getMemory(MemoryModuleType.AVOID_TARGET).orElse(null);
-			if (threat == null || brain.hasMemoryValue(MemoryModuleType.WALK_TARGET) || brain.hasMemoryValue(BunnayAi.HOP_TARGET)
-				|| brain.hasMemoryValue(MemoryModuleType.LONG_JUMP_MID_JUMP) || --this.retryDelay > 0) {
+			if (threat == null || brain.hasMemoryValue(MemoryModuleType.WALK_TARGET) || brain.hasMemoryValue(MemoryModuleType.LONG_JUMP_MID_JUMP)
+				|| --this.retryDelay > 0) {
 				return false;
 			}
 			Vec3 avoid = threat.position();
-			boolean canHop = bunnay.canHopNow() && !brain.hasMemoryValue(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS);
-			if (canHop && bunnay.getRandom().nextBoolean()) {
-				List<BunnayEntity.Hop> hops = bunnay.hopsAwayFrom(avoid, HOP_CANDIDATES);
-				if (!hops.isEmpty()) {
-					BunnayEntity.Hop pick = hops.get(bunnay.getRandom().nextInt(hops.size()));
-					brain.setMemoryWithExpiry(BunnayAi.HOP_TARGET, BlockPos.containing(pick.landing()), 20L);
-					bunnay.debugLog("flee pick: asked for a hop to %s (%d candidates)", pick.landing(), hops.size());
-					return true;
-				}
-			}
 			// The rabbit's rule (AvoidEntityGoal): a place that is no nearer the threat than it is now, and that it has a path to.
 			double nowSqr = avoid.distanceToSqr(bunnay.position());
 			int pathChecks = 0;
@@ -480,8 +445,24 @@ final class BunnayBehaviors {
 
 	// ---- giving ----
 
+	/** Both hand-overs (carrots to the owner, the harvest to the note block) only start once their own cooldown memory has run out. */
+	private abstract static class HandOver extends GoAndGiveItemsToTarget<BunnayEntity> {
+		private final MemoryModuleType<Integer> cooldown;
+
+		HandOver(Function<LivingEntity, Optional<PositionTracker>> target, float speed, int giveUpTicks, GoAndGiveItemsToTarget.ItemThrower<BunnayEntity> thrower,
+			MemoryModuleType<Integer> cooldown, int cooldownTicks, Predicate<BunnayEntity> hasItem) {
+			super(target, speed, giveUpTicks, thrower, cooldown, cooldownTicks, hasItem);
+			this.cooldown = cooldown;
+		}
+
+		@Override
+		protected boolean checkExtraStartConditions(ServerLevel level, BunnayEntity bunnay) {
+			return !bunnay.getBrain().hasMemoryValue(this.cooldown) && super.checkExtraStartConditions(level, bunnay);
+		}
+	}
+
 	/** Tosses carrots to a hungry owner, the way an allay hands items to the player it likes (vanilla's GoAndGiveItemsToTarget). */
-	static final class GiveCarrots extends GoAndGiveItemsToTarget<BunnayEntity> {
+	static final class GiveCarrots extends HandOver {
 		GiveCarrots() {
 			super(
 				bunnay -> bunnay instanceof BunnayEntity b && b.hungryOwner() != null
@@ -496,15 +477,10 @@ final class BunnayBehaviors {
 				BunnayAi.GIFT_COOLDOWN, BunnayEntity.GIFT_COOLDOWN_TICKS,
 				bunnay -> bunnay.freeToHarvest() && bunnay.carrotsToGive() > 0 && bunnay.hungryOwner() != null);
 		}
-
-		@Override
-		protected boolean checkExtraStartConditions(ServerLevel level, BunnayEntity bunnay) {
-			return !bunnay.getBrain().hasMemoryValue(BunnayAi.GIFT_COOLDOWN) && super.checkExtraStartConditions(level, bunnay);
-		}
 	}
 
 	/** Takes the harvest to the note block it is tuned in to and tosses it there, the way an allay hands over what it has collected. */
-	static final class DeliverToNoteBlock extends GoAndGiveItemsToTarget<BunnayEntity> {
+	static final class DeliverToNoteBlock extends HandOver {
 		DeliverToNoteBlock() {
 			super(
 				bunnay -> bunnay instanceof BunnayEntity b && b.getFarmPos() != null
@@ -519,11 +495,6 @@ final class BunnayBehaviors {
 				BunnayAi.DELIVER_COOLDOWN, BunnayEntity.FARM_DELIVER_COOLDOWN,
 				bunnay -> bunnay.getFarmPos() != null && bunnay.freeForFarmWork() && bunnay.carrotsToDeliver() > 0
 					&& (!bunnay.canTakeCarrots() || bunnay.isNoCropsFound()));
-		}
-
-		@Override
-		protected boolean checkExtraStartConditions(ServerLevel level, BunnayEntity bunnay) {
-			return !bunnay.getBrain().hasMemoryValue(BunnayAi.DELIVER_COOLDOWN) && super.checkExtraStartConditions(level, bunnay);
 		}
 	}
 
