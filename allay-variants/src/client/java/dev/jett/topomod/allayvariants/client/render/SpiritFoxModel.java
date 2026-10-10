@@ -39,11 +39,11 @@ public class SpiritFoxModel extends AdultFoxModel {
 			PartPose.offset(-1.0F, 16.5F, -3.0F));
 		head.addOrReplaceChild("right_ear",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(0, 0).addBox(-3.0F, -6.0F, -4.0F, 2.0F, 4.0F, 1.0F),
+				.mirror(false).texOffs(0, 0).addBox(-3.0F, -4.0F, -4.0F, 2.0F, 2.0F, 1.0F),
 			PartPose.offset(0.0F, 0.0F, 0.0F));
 		head.addOrReplaceChild("left_ear",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(6, 0).addBox(3.0F, -6.0F, -4.0F, 2.0F, 4.0F, 1.0F),
+				.mirror(false).texOffs(6, 0).addBox(3.0F, -4.0F, -4.0F, 2.0F, 2.0F, 1.0F),
 			PartPose.offset(0.0F, 0.0F, 0.0F));
 		head.addOrReplaceChild("nose",
 			CubeListBuilder.create()

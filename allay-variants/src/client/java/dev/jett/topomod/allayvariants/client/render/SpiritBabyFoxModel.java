@@ -36,8 +36,8 @@ public class SpiritBabyFoxModel extends BabyFoxModel {
 			CubeListBuilder.create()
 				.mirror(false).texOffs(0, 0).addBox(-3.0F, -2.125F, -5.125F, 6.0F, 5.0F, 5.0F)
 				.mirror(false).texOffs(18, 20).addBox(-1.0F, 0.875F, -7.125F, 2.0F, 2.0F, 2.0F)
-				.mirror(false).texOffs(30, 0).addBox(-3.0F, -5.125F, -4.125F, 2.0F, 3.0F, 1.0F)
-				.mirror(false).texOffs(36, 0).addBox(1.0F, -5.125F, -4.125F, 2.0F, 3.0F, 1.0F),
+				.mirror(false).texOffs(30, 0).addBox(-3.0F, -4.125F, -4.125F, 2.0F, 2.0F, 1.0F)
+				.mirror(false).texOffs(36, 0).addBox(1.0F, -4.125F, -4.125F, 2.0F, 2.0F, 1.0F),
 			PartPose.offset(0.0F, 18.125F, 0.125F));
 		root.addOrReplaceChild("right_hind_leg",
 			CubeListBuilder.create()
