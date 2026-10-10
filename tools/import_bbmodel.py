@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn a saved Blockbench project into the game's model code and texture.
 
-Usage (from the repo root):
+Usage (from the repo root; add --unrotated-ground for a model with rotated bones, see below):
     python3 tools/import_bbmodel.py topo
     python3 tools/import_bbmodel.py bunnay
     python3 tools/import_bbmodel.py <project.bbmodel> <model.java> <texture.png>
@@ -30,8 +30,12 @@ PRESETS = {
 }
 
 
+# A model with rotated bones (a fox's tilted body, say) has cubes whose resting position is below the ground until the rotation is
+# applied, so by default the lowest cube is not the ground. --unrotated-ground finds the ground from the cubes that are not under a rotated bone.
+UNROTATED_GROUND = "--unrotated-ground" in sys.argv
+
 def paths():
-    args = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) == 1 and args[0] in PRESETS:
         return [os.path.join(ROOT, p) for p in PRESETS[args[0]]]
     if len(args) == 3:
@@ -75,7 +79,22 @@ def main():
         return (u, v, u + 2 * d + 2 * w, v + d + h)
 
     # Snap the model to the ground: the lowest cube bottom (y up) becomes y = 0, like vanilla mobs.
-    ground = min(e["from"][1] for e in data["elements"])
+    def unrotated_cubes():
+        found = []
+        def walk(node, rotated):
+            node = resolve(node)
+            if isinstance(node, str):
+                if not rotated:
+                    found.append(elements[node])
+                return
+            now = rotated or any(abs(r) > 1e-6 for r in node.get("rotation", [0, 0, 0]))
+            for child in node.get("children", []):
+                walk(child, now)
+        for top in data["outliner"]:
+            walk(top, False)
+        return found
+    ground_cubes = (unrotated_cubes() if UNROTATED_GROUND else []) or list(data["elements"])
+    ground = min(e["from"][1] for e in ground_cubes)
     if abs(ground) > 1e-6:
         infos.append(f"model was {ground:g} px above the ground in Blockbench; lowered it to stand on the ground in game")
 

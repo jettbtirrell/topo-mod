@@ -19,6 +19,7 @@
 		]
 	},
 	"mixins": [
+		"allay_variants.mixins.json",
 		{
 			"config": "allay_variants.client.mixins.json",
 			"environment": "client"

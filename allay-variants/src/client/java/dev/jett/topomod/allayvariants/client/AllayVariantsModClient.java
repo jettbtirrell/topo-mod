@@ -2,6 +2,9 @@ package dev.jett.topomod.allayvariants.client;
 
 import dev.jett.topomod.allayvariants.client.render.BunnayModel;
 import dev.jett.topomod.allayvariants.client.render.BunnayRenderer;
+import dev.jett.topomod.allayvariants.client.render.SpiritBabyFoxModel;
+import dev.jett.topomod.allayvariants.client.render.SpiritFoxModel;
+import dev.jett.topomod.allayvariants.client.render.SpiritFoxRenderer;
 import dev.jett.topomod.allayvariants.client.screen.BunnayScreen;
 import dev.jett.topomod.allayvariants.item.GreatswordStillness;
 import dev.jett.topomod.allayvariants.registry.ModEntities;
@@ -21,6 +24,9 @@ public class AllayVariantsModClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ModelLayerRegistry.registerModelLayer(BunnayRenderer.LAYER, BunnayModel::createBodyLayer);
 		EntityRendererRegistry.register(ModEntities.BUNNAY, BunnayRenderer::new);
+		ModelLayerRegistry.registerModelLayer(SpiritFoxRenderer.LAYER, SpiritFoxModel::createBodyLayer);
+		ModelLayerRegistry.registerModelLayer(SpiritFoxRenderer.BABY_LAYER, SpiritBabyFoxModel::createBodyLayer);
+		EntityRendererRegistry.register(ModEntities.SPIRIT_FOX, SpiritFoxRenderer::new);
 		MenuScreens.register(ModMenus.BUNNAY, BunnayScreen::new);
 		// The client keeps its own cooldown meter (the crosshair shows it), so the greatsword holds it empty here too.
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
