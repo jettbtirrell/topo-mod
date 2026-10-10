@@ -41,9 +41,9 @@ public final class Cauterize {
 	}
 
 	/** The damage added to a hit on {@code target}, before the burn is used up. Only a hit on a full cooldown gets any. */
-	public static float bonusDamage(Entity target, DamageSource source) {
+	public static float bonusDamage(Entity target, float damage, DamageSource source) {
 		pendingTarget = null;
-		if (target.fireImmune() || !target.isOnFire() || !(source.getDirectEntity() instanceof Player attacker) || attacker.getAttackStrengthScale(0.5F) < 1.0F) {
+		if (target.fireImmune() || !target.isOnFire() || !(source.getDirectEntity() instanceof Player attacker) || !AttackMeter.isFull(AttackMeter.ofHit(attacker, damage))) {
 			return 0.0F;
 		}
 		pendingTarget = target;

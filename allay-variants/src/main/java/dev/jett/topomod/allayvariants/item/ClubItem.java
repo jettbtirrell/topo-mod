@@ -43,7 +43,7 @@ public class ClubItem extends Item {
 
 	@Override
 	public float getAttackDamageBonus(Entity target, float damage, DamageSource damageSource) {
-		return Cauterize.bonusDamage(target, damageSource);
+		return Cauterize.bonusDamage(target, damage, damageSource);
 	}
 
 	@Override
