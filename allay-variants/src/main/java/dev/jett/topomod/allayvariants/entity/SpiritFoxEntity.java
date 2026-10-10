@@ -656,6 +656,18 @@ public class SpiritFoxEntity extends TamableAnimal {
 	@Override
 	public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
 		ItemStack itemStack = player.getItemInHand(hand);
+		// On a tame one, an empty hand takes what it is carrying in its mouth (instead of toggling its sitting).
+		ItemStack inMouth = this.getItemBySlot(EquipmentSlot.MAINHAND);
+		if (this.isTame() && itemStack.isEmpty() && !inMouth.isEmpty()) {
+			if (!this.level().isClientSide()) {
+				player.setItemInHand(hand, inMouth);
+				this.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+				this.ticksSinceEaten = 0;
+				this.playSound(SoundEvents.ITEM_PICKUP, 0.4F, 1.0F);
+			}
+			return InteractionResult.SUCCESS;
+		}
+
 		if (this.isTame()) {
 			if (this.isFood(itemStack) && this.getHealth() < this.getMaxHealth()) {
 				this.feed(player, hand, itemStack, 2.0F, 2.0F);
