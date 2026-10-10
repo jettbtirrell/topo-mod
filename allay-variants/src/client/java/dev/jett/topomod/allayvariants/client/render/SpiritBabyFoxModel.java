@@ -3,6 +3,7 @@ package dev.jett.topomod.allayvariants.client.render;
 import net.minecraft.client.model.animal.fox.BabyFoxModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
+import net.minecraft.client.model.geom.builders.CubeDeformation;
 import net.minecraft.client.model.geom.builders.CubeListBuilder;
 import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
@@ -65,13 +66,13 @@ public class SpiritBabyFoxModel extends BabyFoxModel {
 			PartPose.offset(0.0F, -0.5F, 3.0F));
 		body.addOrReplaceChild("tail_left",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(30, 5).addBox(-1.5F, -1.48F, -1.0F, 3.0F, 3.0F, 5.0F)
-				.mirror(false).texOffs(52, 0).addBox(-1.5F, -1.48F, 4.0F, 3.0F, 3.0F, 2.0F),
+				.mirror(false).texOffs(30, 5).addBox(-1.5F, -1.48F, -1.0F, 3.0F, 3.0F, 5.0F, new CubeDeformation(0.01F))
+				.mirror(false).texOffs(52, 0).addBox(-1.5F, -1.48F, 4.0F, 3.0F, 3.0F, 2.0F, new CubeDeformation(0.01F)),
 			PartPose.offsetAndRotation(0.0F, -0.5F, 3.0F, 0.0F, 0.5F, 0.0F));
 		body.addOrReplaceChild("tail_right",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(46, 5).addBox(-1.5F, -1.48F, -1.0F, 3.0F, 3.0F, 5.0F)
-				.mirror(false).texOffs(22, 13).addBox(-1.5F, -1.48F, 4.0F, 3.0F, 3.0F, 2.0F),
+				.mirror(false).texOffs(46, 5).addBox(-1.5F, -1.48F, -1.0F, 3.0F, 3.0F, 5.0F, new CubeDeformation(0.01F))
+				.mirror(false).texOffs(22, 13).addBox(-1.5F, -1.48F, 4.0F, 3.0F, 3.0F, 2.0F, new CubeDeformation(0.01F)),
 			PartPose.offsetAndRotation(0.0F, -0.5F, 3.0F, 0.0F, -0.5F, 0.0F));
 		// END GENERATED
 
@@ -81,6 +82,10 @@ public class SpiritBabyFoxModel extends BabyFoxModel {
 	@Override
 	public void setupAnim(FoxRenderState state) {
 		super.setupAnim(state);
+		// Its health shows in how high it carries its tails (the sitting and sleeping poses place them themselves).
+		if (state instanceof SpiritFoxRenderState fox && !state.isSitting && !state.isSleeping) {
+			this.tail.xRot += fox.tailLift;
+		}
 		// The baby's tails lie along its back, so they sway sideways (around the up axis).
 		this.followTail(this.leftTail, Mth.sin(state.ageInTicks * SWAY_SPEED) * SWAY);
 		this.followTail(this.rightTail, Mth.sin(state.ageInTicks * SWAY_SPEED + 2.0F) * -SWAY);

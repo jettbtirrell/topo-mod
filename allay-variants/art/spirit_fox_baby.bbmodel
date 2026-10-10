@@ -1078,7 +1078,8 @@
     }
    },
    "type": "cube",
-   "uuid": "d1162177-ee7c-4fa1-afed-c30ebaaeb0cf"
+   "uuid": "d1162177-ee7c-4fa1-afed-c30ebaaeb0cf",
+   "inflate": 0.01
   },
   {
    "name": "tail_left_tip",
@@ -1166,7 +1167,8 @@
     }
    },
    "type": "cube",
-   "uuid": "bb6cb5db-589e-472a-a3eb-4e2582c55663"
+   "uuid": "bb6cb5db-589e-472a-a3eb-4e2582c55663",
+   "inflate": 0.01
   },
   {
    "name": "tail_right_cube",
@@ -1254,7 +1256,8 @@
     }
    },
    "type": "cube",
-   "uuid": "9eddb2ef-c90f-4bcd-b495-694dfe42b9c3"
+   "uuid": "9eddb2ef-c90f-4bcd-b495-694dfe42b9c3",
+   "inflate": 0.01
   },
   {
    "name": "tail_right_tip",
@@ -1342,7 +1345,8 @@
     }
    },
    "type": "cube",
-   "uuid": "8f4cea26-409b-4bc6-aa8d-0c5917eda4ad"
+   "uuid": "8f4cea26-409b-4bc6-aa8d-0c5917eda4ad",
+   "inflate": 0.01
   }
  ],
  "groups": [

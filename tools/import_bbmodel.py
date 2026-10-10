@@ -110,8 +110,9 @@ def main():
 
     def cube_call(e, origin, indent, warn_name):
         """addBox(...) text for a cube, with coordinates relative to `origin` (Blockbench space)."""
-        if e.get("inflate"):
-            warnings.append(f"cube '{e['name']}' uses inflate, which is ignored")
+        # A cube's inflate becomes a CubeDeformation (the model class has to import it). Vanilla mobs use a tiny one (0.001) on legs and the like
+        # so that faces that line up exactly with the body's do not flicker.
+        grow = f", new CubeDeformation({jf(e['inflate'])})" if e.get("inflate") else ""
         if not e.get("box_uv", True):
             warnings.append(f"cube '{e['name']}' uses per-face UVs; switch it to box UV")
         u, v = fixed_uv(e)
@@ -119,7 +120,7 @@ def main():
         w, h, d = t[0] - f[0], t[1] - f[1], t[2] - f[2]
         ax, ay, az = f[0] - origin[0], origin[1] - t[1], f[2] - origin[2]
         mir = "true" if e.get("mirror_uv", warn_name) else "false"
-        return f"\n{indent}\t\t.mirror({mir}).texOffs({int(u)}, {int(v)}).addBox({jf(ax)}, {jf(ay)}, {jf(az)}, {jf(w)}, {jf(h)}, {jf(d)})"
+        return f"\n{indent}\t\t.mirror({mir}).texOffs({int(u)}, {int(v)}).addBox({jf(ax)}, {jf(ay)}, {jf(az)}, {jf(w)}, {jf(h)}, {jf(d)}{grow})"
 
     def pose_text(rel, mc_rot):
         if any(abs(r) > 1e-6 for r in mc_rot):

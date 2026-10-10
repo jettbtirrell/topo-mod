@@ -722,7 +722,8 @@
     }
    },
    "type": "cube",
-   "uuid": "2a65977d-e8a4-4cb3-ab63-649b1ecfe9c2"
+   "uuid": "2a65977d-e8a4-4cb3-ab63-649b1ecfe9c2",
+   "inflate": 0.01
   },
   {
    "name": "tail_left_tip",
@@ -810,7 +811,8 @@
     }
    },
    "type": "cube",
-   "uuid": "e7c3b07c-4b8f-4074-8aec-f56f92e9380e"
+   "uuid": "e7c3b07c-4b8f-4074-8aec-f56f92e9380e",
+   "inflate": 0.01
   },
   {
    "name": "tail_right_cube_1",
@@ -898,7 +900,8 @@
     }
    },
    "type": "cube",
-   "uuid": "6292b8dd-0119-4d99-b175-64ecde35f023"
+   "uuid": "6292b8dd-0119-4d99-b175-64ecde35f023",
+   "inflate": 0.01
   },
   {
    "name": "tail_right_tip",
@@ -986,7 +989,8 @@
     }
    },
    "type": "cube",
-   "uuid": "bfe6ba06-66f0-4141-9721-7d77a9fee6ac"
+   "uuid": "bfe6ba06-66f0-4141-9721-7d77a9fee6ac",
+   "inflate": 0.01
   },
   {
    "name": "right_hind_leg_cube",
@@ -1074,7 +1078,8 @@
     }
    },
    "type": "cube",
-   "uuid": "66cc1303-b814-4da7-98e6-bfab2c449038"
+   "uuid": "66cc1303-b814-4da7-98e6-bfab2c449038",
+   "inflate": 0.001
   },
   {
    "name": "left_hind_leg_cube",
@@ -1162,7 +1167,8 @@
     }
    },
    "type": "cube",
-   "uuid": "4028a7c4-c4f3-470c-a03f-821237c33d4a"
+   "uuid": "4028a7c4-c4f3-470c-a03f-821237c33d4a",
+   "inflate": 0.001
   },
   {
    "name": "right_front_leg_cube",
@@ -1250,7 +1256,8 @@
     }
    },
    "type": "cube",
-   "uuid": "69b0761e-805e-4b25-a619-10415db876b7"
+   "uuid": "69b0761e-805e-4b25-a619-10415db876b7",
+   "inflate": 0.001
   },
   {
    "name": "left_front_leg_cube",
@@ -1338,7 +1345,8 @@
     }
    },
    "type": "cube",
-   "uuid": "a5dcf0d6-37cb-4dfd-b72e-445476f1a9c7"
+   "uuid": "a5dcf0d6-37cb-4dfd-b72e-445476f1a9c7",
+   "inflate": 0.001
   }
  ],
  "groups": [

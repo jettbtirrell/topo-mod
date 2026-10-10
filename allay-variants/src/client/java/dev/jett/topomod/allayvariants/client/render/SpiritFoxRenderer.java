@@ -14,12 +14,17 @@ import net.minecraft.client.renderer.entity.layers.FoxHeldItemLayer;
 import net.minecraft.client.renderer.entity.state.FoxRenderState;
 import net.minecraft.client.renderer.entity.state.HoldingEntityRenderState;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 
 // Drawn the way the vanilla fox is (FoxRenderer): the same poses and the item in its mouth, with its own models and textures (a different
 // one asleep, as the fox's is), and its tail tips drawn at full brightness on top (SpiritFoxGlowLayer).
 public class SpiritFoxRenderer extends AgeableMobRenderer<SpiritFoxEntity, FoxRenderState, FoxModel> {
 	public static final ModelLayerLocation LAYER = new ModelLayerLocation(AllayVariantsMod.id("spirit_fox"), "main");
 	public static final ModelLayerLocation BABY_LAYER = new ModelLayerLocation(AllayVariantsMod.id("spirit_fox"), "baby");
+
+	/** How far the tails are lifted (radians, up is positive) at full health and at none, for a tame one. */
+	private static final float TAIL_LIFT_FULL = 0.45F;
+	private static final float TAIL_LIFT_EMPTY = -0.85F;
 
 	private static final Identifier TEXTURE = texture("spirit_fox");
 	private static final Identifier SLEEP_TEXTURE = texture("spirit_fox_sleep");
@@ -54,7 +59,7 @@ public class SpiritFoxRenderer extends AgeableMobRenderer<SpiritFoxEntity, FoxRe
 
 	@Override
 	public FoxRenderState createRenderState() {
-		return new FoxRenderState();
+		return new SpiritFoxRenderState();
 	}
 
 	@Override
@@ -68,5 +73,8 @@ public class SpiritFoxRenderer extends AgeableMobRenderer<SpiritFoxEntity, FoxRe
 		state.isSitting = entity.isSitting();
 		state.isFaceplanted = entity.isFaceplanted();
 		state.isPouncing = entity.isPouncing();
+		// A tame one's tails show its health, as a wolf's tail does: lifted at full health, hanging when nearly out. A wild one carries them as a fox does.
+		float health = entity.isTame() ? Mth.clamp(entity.getHealth() / entity.getMaxHealth(), 0.0F, 1.0F) : 1.0F;
+		((SpiritFoxRenderState) state).tailLift = entity.isTame() ? Mth.lerp(health, TAIL_LIFT_EMPTY, TAIL_LIFT_FULL) : 0.0F;
 	}
 }

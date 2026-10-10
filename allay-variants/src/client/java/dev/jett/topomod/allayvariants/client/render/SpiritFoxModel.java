@@ -3,6 +3,7 @@ package dev.jett.topomod.allayvariants.client.render;
 import net.minecraft.client.model.animal.fox.AdultFoxModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
+import net.minecraft.client.model.geom.builders.CubeDeformation;
 import net.minecraft.client.model.geom.builders.CubeListBuilder;
 import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
@@ -59,29 +60,29 @@ public class SpiritFoxModel extends AdultFoxModel {
 			PartPose.offsetAndRotation(-4.0F, 15.0F, -1.0F, -0.0524F, 0.0F, 0.0F));
 		body.addOrReplaceChild("tail_left",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(18, 32).addBox(-2.0F, 0.0F, -1.0F, 4.0F, 8.0F, 5.0F)
-				.mirror(false).texOffs(36, 32).addBox(-2.0F, 8.0F, -1.0F, 4.0F, 2.0F, 5.0F),
+				.mirror(false).texOffs(18, 32).addBox(-2.0F, 0.0F, -1.0F, 4.0F, 8.0F, 5.0F, new CubeDeformation(0.01F))
+				.mirror(false).texOffs(36, 32).addBox(-2.0F, 8.0F, -1.0F, 4.0F, 2.0F, 5.0F, new CubeDeformation(0.01F)),
 			PartPose.offsetAndRotation(0.0F, 15.0F, -1.0F, -0.0524F, 0.0F, 0.45F));
 		body.addOrReplaceChild("tail_right",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(0, 39).addBox(-2.0F, 0.0F, -1.0F, 4.0F, 8.0F, 5.0F)
-				.mirror(false).texOffs(36, 39).addBox(-2.0F, 8.0F, -1.0F, 4.0F, 2.0F, 5.0F),
+				.mirror(false).texOffs(0, 39).addBox(-2.0F, 0.0F, -1.0F, 4.0F, 8.0F, 5.0F, new CubeDeformation(0.01F))
+				.mirror(false).texOffs(36, 39).addBox(-2.0F, 8.0F, -1.0F, 4.0F, 2.0F, 5.0F, new CubeDeformation(0.01F)),
 			PartPose.offsetAndRotation(0.0F, 15.0F, -1.0F, -0.0524F, 0.0F, -0.45F));
 		root.addOrReplaceChild("right_hind_leg",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(13, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F),
+				.mirror(false).texOffs(13, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F, new CubeDeformation(0.001F)),
 			PartPose.offset(-5.0F, 17.5F, 7.0F));
 		root.addOrReplaceChild("left_hind_leg",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(4, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F),
+				.mirror(false).texOffs(4, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F, new CubeDeformation(0.001F)),
 			PartPose.offset(-1.0F, 17.5F, 7.0F));
 		root.addOrReplaceChild("right_front_leg",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(13, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F),
+				.mirror(false).texOffs(13, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F, new CubeDeformation(0.001F)),
 			PartPose.offset(-5.0F, 17.5F, 0.0F));
 		root.addOrReplaceChild("left_front_leg",
 			CubeListBuilder.create()
-				.mirror(false).texOffs(4, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F),
+				.mirror(false).texOffs(4, 24).addBox(2.0F, 0.5F, -1.0F, 2.0F, 6.0F, 2.0F, new CubeDeformation(0.001F)),
 			PartPose.offset(-1.0F, 17.5F, 0.0F));
 		// END GENERATED
 
@@ -91,6 +92,10 @@ public class SpiritFoxModel extends AdultFoxModel {
 	@Override
 	public void setupAnim(FoxRenderState state) {
 		super.setupAnim(state);
+		// Its health shows in how high it carries its tails (the sitting and sleeping poses place them themselves).
+		if (state instanceof SpiritFoxRenderState fox && !state.isSitting && !state.isSleeping) {
+			this.tail.xRot += fox.tailLift;
+		}
 		// Whatever the fox's poses do to its tail (sitting, sleeping) the side tails do too, with a little sway of their own.
 		this.followTail(this.leftTail, Mth.sin(state.ageInTicks * SWAY_SPEED) * SWAY);
 		this.followTail(this.rightTail, Mth.sin(state.ageInTicks * SWAY_SPEED + 2.0F) * -SWAY);

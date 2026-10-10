@@ -19,6 +19,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
@@ -161,6 +162,8 @@ public class SpiritFoxEntity extends TamableAnimal {
 		this.goalSelector.addGoal(0, new ClimbOnTopOfPowderSnowGoal(this, this.level()));
 		this.goalSelector.addGoal(1, new SpiritFoxEntity.FaceplantGoal());
 		this.goalSelector.addGoal(2, new SpiritFoxEntity.FoxPanicGoal(2.2));
+		// A tame one does not run from being hit (a wolf does not), only from what the environment does to it: fire, freezing and the like.
+		this.goalSelector.addGoal(2, new TamableAnimal.TamableAnimalPanicGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
 		this.goalSelector.addGoal(2, new SitWhenOrderedToGoal(this));
 		this.goalSelector.addGoal(3, new SpiritFoxEntity.FoxBreedGoal(1.0));
 		this.goalSelector
@@ -292,7 +295,7 @@ public class SpiritFoxEntity extends TamableAnimal {
 		return Animal.createAnimalAttributes()
 			.add(Attributes.MOVEMENT_SPEED, 0.3F)
 			.add(Attributes.MAX_HEALTH, 10.0)
-			.add(Attributes.ATTACK_DAMAGE, 2.0)
+			.add(Attributes.ATTACK_DAMAGE, 4.0)
 			.add(Attributes.SAFE_FALL_DISTANCE, 5.0)
 			.add(Attributes.FOLLOW_RANGE, 32.0);
 	}
@@ -1027,7 +1030,7 @@ public class SpiritFoxEntity extends TamableAnimal {
 
 		@Override
 		public boolean shouldPanic() {
-			return !SpiritFoxEntity.this.isDefending() && super.shouldPanic();
+			return !SpiritFoxEntity.this.isTame() && !SpiritFoxEntity.this.isDefending() && super.shouldPanic();
 		}
 	}
 
