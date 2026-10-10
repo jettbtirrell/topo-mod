@@ -42,6 +42,7 @@ replay_*.log
 # Models extracted from the Minecraft jar for reference only (Mojang assets, do not commit)
 allay-variants/art/vanilla-reference/
 topo/art/vanilla-reference/
+companion/art/vanilla-reference/
 
 # Vanilla game source copied for comparison only (Mojang code, do not commit)
 reference/
