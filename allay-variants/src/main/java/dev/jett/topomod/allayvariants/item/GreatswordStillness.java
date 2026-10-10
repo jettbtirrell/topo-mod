@@ -15,8 +15,8 @@ import net.minecraft.world.entity.player.Player;
 public final class GreatswordStillness {
 	/** Share of the full damage that a hit with an empty meter does (vanilla's is 0.2). */
 	private static final float MIN_SHARE = 0.05F;
-	/** How steeply the damage rises with the meter: 5 keeps a half-full meter at about 8% (vanilla's is 40%). */
-	private static final float EXPONENT = 5.0F;
+	/** How steeply the damage rises with the meter: 4 keeps a half-full meter at about 8% (vanilla's is 40%). */
+	private static final float EXPONENT = 4.0F;
 
 	private GreatswordStillness() {
 	}

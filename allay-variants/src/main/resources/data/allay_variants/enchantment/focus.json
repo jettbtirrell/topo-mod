@@ -10,14 +10,13 @@
 					"type": "minecraft:lookup",
 					"fallback": {
 						"type": "minecraft:linear",
-						"base": 0.5,
+						"base": 0.2142857,
 						"per_level_above_first": 0.0
 					},
 					"values": [
-						0.0714286,
-						0.1666667,
-						0.3,
-						0.5
+						0.0555556,
+						0.125,
+						0.2142857
 					]
 				},
 				"attribute": "minecraft:attack_speed",
@@ -30,7 +29,7 @@
 		"base": 40,
 		"per_level_above_first": 10
 	},
-	"max_level": 4,
+	"max_level": 3,
 	"min_cost": {
 		"base": 10,
 		"per_level_above_first": 10
