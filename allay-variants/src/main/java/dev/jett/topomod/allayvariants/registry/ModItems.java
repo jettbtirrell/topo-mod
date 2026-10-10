@@ -1,6 +1,7 @@
 package dev.jett.topomod.allayvariants.registry;
 
 import dev.jett.topomod.allayvariants.AllayVariantsMod;
+import dev.jett.topomod.allayvariants.item.ClubItem;
 import dev.jett.topomod.allayvariants.item.GreatswordItem;
 
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
@@ -12,6 +13,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.JukeboxSong;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.SpawnEggItem;
@@ -46,8 +48,21 @@ public final class ModItems {
 		GREATSWORD_KEY,
 		new GreatswordItem(new Item.Properties().setId(GREATSWORD_KEY).rarity(Rarity.RARE).durability(500)
 			.component(DataComponents.TOOL, GreatswordItem.createToolProperties())
-			.component(DataComponents.USE_EFFECTS, GreatswordItem.createUseEffects())
 			.attributes(GreatswordItem.createAttributes())
+			.enchantable(15)
+			.component(DataComponents.WEAPON, new Weapon(1)))
+	);
+
+	public static final ResourceKey<Item> CLUB_KEY = ResourceKey.create(Registries.ITEM, AllayVariantsMod.id("club"));
+
+	/** Set up like the mace, down to the repair material: the blaze rod to the mace's breeze rod. */
+	public static final Item CLUB = Registry.register(
+		BuiltInRegistries.ITEM,
+		CLUB_KEY,
+		new ClubItem(new Item.Properties().setId(CLUB_KEY).rarity(Rarity.EPIC).durability(500).fireResistant()
+			.component(DataComponents.TOOL, ClubItem.createToolProperties())
+			.repairable(Items.BLAZE_ROD)
+			.attributes(ClubItem.createAttributes())
 			.enchantable(15)
 			.component(DataComponents.WEAPON, new Weapon(1)))
 	);
@@ -57,7 +72,10 @@ public final class ModItems {
 
 	public static void register() {
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES).register(entries -> entries.accept(MUSIC_DISC_BUNNY));
-		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.COMBAT).register(entries -> entries.accept(GREATSWORD));
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.COMBAT).register(entries -> {
+			entries.accept(GREATSWORD);
+			entries.accept(CLUB);
+		});
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> entries.accept(BUNNAY_SPAWN_EGG));
 	}
 }

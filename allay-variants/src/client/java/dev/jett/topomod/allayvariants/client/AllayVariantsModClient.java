@@ -3,10 +3,13 @@ package dev.jett.topomod.allayvariants.client;
 import dev.jett.topomod.allayvariants.client.render.BunnayModel;
 import dev.jett.topomod.allayvariants.client.render.BunnayRenderer;
 import dev.jett.topomod.allayvariants.client.screen.BunnayScreen;
+import dev.jett.topomod.allayvariants.item.GreatswordStillness;
 import dev.jett.topomod.allayvariants.registry.ModEntities;
+import dev.jett.topomod.allayvariants.registry.ModItems;
 import dev.jett.topomod.allayvariants.registry.ModMenus;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 
@@ -19,5 +22,11 @@ public class AllayVariantsModClient implements ClientModInitializer {
 		ModelLayerRegistry.registerModelLayer(BunnayRenderer.LAYER, BunnayModel::createBodyLayer);
 		EntityRendererRegistry.register(ModEntities.BUNNAY, BunnayRenderer::new);
 		MenuScreens.register(ModMenus.BUNNAY, BunnayScreen::new);
+		// The client keeps its own cooldown meter (the crosshair shows it), so the greatsword holds it empty here too.
+		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			if (client.player != null && client.player.getMainHandItem().is(ModItems.GREATSWORD)) {
+				GreatswordStillness.tick(client.player, client.player.input.keyPresses);
+			}
+		});
 	}
 }

@@ -1,0 +1,43 @@
+{
+	"anvil_cost": 2,
+	"description": {
+		"translate": "enchantment.allay_variants.focus"
+	},
+	"effects": {
+		"minecraft:attributes": [
+			{
+				"amount": {
+					"type": "minecraft:lookup",
+					"fallback": {
+						"type": "minecraft:linear",
+						"base": 0.5,
+						"per_level_above_first": 0.0
+					},
+					"values": [
+						0.0714286,
+						0.1666667,
+						0.3,
+						0.5
+					]
+				},
+				"attribute": "minecraft:attack_speed",
+				"id": "allay_variants:enchantment.focus",
+				"operation": "add_value"
+			}
+		]
+	},
+	"max_cost": {
+		"base": 40,
+		"per_level_above_first": 10
+	},
+	"max_level": 4,
+	"min_cost": {
+		"base": 10,
+		"per_level_above_first": 10
+	},
+	"slots": [
+		"mainhand"
+	],
+	"supported_items": "allay_variants:greatsword",
+	"weight": 5
+}

@@ -1,5 +1,8 @@
 {
+	"enchantment.allay_variants.backdraft": "Backdraft",
+	"enchantment.allay_variants.focus": "Focus",
 	"entity.allay_variants.bunnay": "Bunnay",
+	"item.allay_variants.club": "Club",
 	"item.allay_variants.bunnay_spawn_egg": "Bunnay Spawn Egg",
 	"item.allay_variants.greatsword": "Greatsword",
 	"item.allay_variants.music_disc_bunny": "Music Disc",

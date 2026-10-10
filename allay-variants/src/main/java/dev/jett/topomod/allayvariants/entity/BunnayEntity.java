@@ -8,12 +8,14 @@ import java.util.function.ToDoubleFunction;
 import java.util.function.BiConsumer;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -142,6 +144,9 @@ public class BunnayEntity extends TamableAnimal {
 	/** The wind burst's shove on a foe: this fast away from the bunnay, and this fast straight up (0.9 is about 4 blocks of height). */
 	static final double WIND_BURST_HORIZONTAL = 0.5;
 	static final double WIND_BURST_VERTICAL = 0.9;
+	/** Its owner, if within this many blocks of the burst (a wind burst enchantment's radius), is shot up too, fast enough to rise about 7 blocks. */
+	static final double WIND_BURST_RADIUS = 3.5;
+	static final double PLAYER_WIND_BURST_VERTICAL = 1.1;
 	/**
 	 * How long it waits between swings, in ticks: 12, quicker than a warden's 18 because the bunnay is always swinging two hands
 	 * in turn. The wait is shared by both hands, and it is the same whatever they hold.
@@ -738,6 +743,12 @@ public class BunnayEntity extends TamableAnimal {
 		double length = Math.max(Math.sqrt(dx * dx + dz * dz), 1.0E-4);
 		victim.setDeltaMovement(dx / length * WIND_BURST_HORIZONTAL, WIND_BURST_VERTICAL, dz / length * WIND_BURST_HORIZONTAL);
 		victim.needsSync = true;
+		if (this.getOwner() instanceof ServerPlayer owner && owner.isAlive() && owner.distanceToSqr(victim) <= WIND_BURST_RADIUS * WIND_BURST_RADIUS) {
+			// Like the mace's own launch: straight up, and the fall back down does not hurt, so it is a free run at the foe from above.
+			owner.setDeltaMovement(owner.getDeltaMovement().with(Direction.Axis.Y, PLAYER_WIND_BURST_VERTICAL));
+			owner.setIgnoreFallDamageFromCurrentImpulse(true, victim.position());
+			owner.connection.send(new ClientboundSetEntityMotionPacket(owner));
+		}
 		level.sendParticles(ParticleTypes.GUST_EMITTER_SMALL, victim.getX(), victim.getY() + 0.1, victim.getZ(), 1, 0.0, 0.0, 0.0, 0.0);
 		level.playSound(null, victim.getX(), victim.getY(), victim.getZ(), SoundEvents.WIND_CHARGE_BURST.value(), SoundSource.NEUTRAL, 1.0F, 1.0F);
 	}
