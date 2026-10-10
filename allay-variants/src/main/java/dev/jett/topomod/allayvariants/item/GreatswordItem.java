@@ -2,6 +2,7 @@ package dev.jett.topomod.allayvariants.item;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.EquipmentSlotGroup;
@@ -16,8 +17,8 @@ import java.util.List;
 
 /**
  * A weapon with no tiers, like the mace and the trident. It hits for 30 at a full meter, and the meter takes 2 seconds
- * to fill but only does so while you stand still (see GreatswordStillness). A hit on a part-filled meter does vanilla's
- * share of the damage.
+ * to fill but only does so while you stand still (see GreatswordStillness). A hit on a part-filled meter does much less
+ * than vanilla's share of the damage.
  */
 public class GreatswordItem extends Item {
 	/** The 1 that bare hands do is added to this, for 30. */
@@ -38,6 +39,11 @@ public class GreatswordItem extends Item {
 
 	public static Tool createToolProperties() {
 		return new Tool(List.of(), 1.0F, 2, false);
+	}
+
+	@Override
+	public float getAttackDamageBonus(Entity target, float damage, DamageSource damageSource) {
+		return GreatswordStillness.underchargedDamage(damage, damageSource);
 	}
 
 	@Override
