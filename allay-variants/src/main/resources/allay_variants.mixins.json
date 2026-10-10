@@ -4,7 +4,8 @@
 	"package": "dev.jett.topomod.allayvariants.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"BaseFireBlockMixin"
+		"BaseFireBlockMixin",
+		"EntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
