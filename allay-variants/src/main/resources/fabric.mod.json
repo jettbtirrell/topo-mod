@@ -18,6 +18,12 @@
 			"dev.jett.topomod.allayvariants.client.AllayVariantsModClient"
 		]
 	},
+	"mixins": [
+		{
+			"config": "allay_variants.client.mixins.json",
+			"environment": "client"
+		}
+	],
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",

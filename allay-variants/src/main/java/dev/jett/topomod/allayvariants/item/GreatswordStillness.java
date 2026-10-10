@@ -53,7 +53,7 @@ public final class GreatswordStillness {
 	}
 
 	/** Walking, jumping, or in the air for any other reason, like a fall or a knockback. */
-	private static boolean isMoving(Player player, Input input) {
+	public static boolean isMoving(Player player, Input input) {
 		return input.forward() || input.backward() || input.left() || input.right() || input.jump() || !player.onGround();
 	}
 }
