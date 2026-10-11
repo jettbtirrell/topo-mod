@@ -2,6 +2,7 @@
 dependencies {
 	include project(':allay-variants')
 	include project(':damage-numbers')
+	include project(':sky-islands')
 	// Topo is only part of the bundle when it is part of the build (include_topo, see settings.gradle).
 	if (rootProject.findProject(':topo') != null) {
 		include project(':topo')

@@ -7,6 +7,7 @@ Fabric mods for Minecraft 26.3. Each mod is one jar that runs on both client and
 | `allay-variants/` | `allay_variants` | Allay crossbreeds, starting with the bunnay: a rabbit-allay companion that fights, farms and hops |
 | `topo/` | `topo` | The topo, a mouse companion that holds torches, shards and pearls. **Not part of the build by default** (see below) |
 | `damage-numbers/` | `topo_damage_numbers` | Floating damage numbers when entities are hit |
+| `sky-islands/` | `sky_islands` | A floating-islands dimension (data only): Overworld-like islands in a hazy sky |
 | `bundle/` | `topo_mod` | No code; embeds the mods above in one jar |
 
 ## Develop

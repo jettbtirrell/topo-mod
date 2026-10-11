@@ -1,0 +1,18 @@
+{
+	"schemaVersion": 1,
+	"id": "sky_islands",
+	"version": "${version}",
+	"name": "Sky Islands",
+	"description": "A floating-islands dimension: Overworld-like islands in a hazy, strangely lit sky.",
+	"authors": [
+		"jettbtirrell"
+	],
+	"license": "CC0-1.0",
+	"environment": "*",
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

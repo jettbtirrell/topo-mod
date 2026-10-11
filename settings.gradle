@@ -11,7 +11,7 @@ pluginManagement {
 
 rootProject.name = 'topo_mod'
 
-include 'allay-variants', 'damage-numbers', 'bundle'
+include 'allay-variants', 'damage-numbers', 'sky-islands', 'bundle'
 
 // Topo is its own mod, left out of the build (and out of the bundle) unless asked for: set include_topo=true in
 // gradle.properties, or pass -Pinclude_topo=true.

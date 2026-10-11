@@ -1,0 +1,48 @@
+{
+  "type": "sky_islands:sky_islands",
+  "generator": {
+    "type": "minecraft:noise",
+    "settings": "sky_islands:floating_islands",
+    "biome_source": {
+      "type": "minecraft:multi_noise",
+      "biomes": [
+        {
+          "biome": "sky_islands:plains",
+          "parameters": {
+            "temperature": 0.25,
+            "humidity": -0.3,
+            "continentalness": 0,
+            "erosion": 0,
+            "depth": 0,
+            "weirdness": 0,
+            "offset": 0
+          }
+        },
+        {
+          "biome": "sky_islands:forest",
+          "parameters": {
+            "temperature": 0,
+            "humidity": 0.35,
+            "continentalness": 0,
+            "erosion": 0,
+            "depth": 0,
+            "weirdness": 0,
+            "offset": 0
+          }
+        },
+        {
+          "biome": "sky_islands:meadow",
+          "parameters": {
+            "temperature": -0.3,
+            "humidity": 0,
+            "continentalness": 0,
+            "erosion": 0,
+            "depth": 0,
+            "weirdness": 0,
+            "offset": 0
+          }
+        }
+      ]
+    }
+  }
+}
