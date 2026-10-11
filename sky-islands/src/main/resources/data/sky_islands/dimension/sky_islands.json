@@ -1,5 +1,5 @@
 {
-  "type": "minecraft:overworld",
+  "type": "sky_islands:sky_islands",
   "generator": {
     "type": "minecraft:noise",
     "settings": "minecraft:overworld",
