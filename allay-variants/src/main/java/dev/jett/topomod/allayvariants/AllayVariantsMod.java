@@ -1,7 +1,10 @@
 package dev.jett.topomod.allayvariants;
 
+import dev.jett.topomod.allayvariants.command.SpiritFoxCommand;
 import dev.jett.topomod.allayvariants.entity.BunnayAi;
 import dev.jett.topomod.allayvariants.entity.BunnayBreeding;
+import dev.jett.topomod.allayvariants.registry.ModAttachments;
+import dev.jett.topomod.allayvariants.registry.ModEffects;
 import dev.jett.topomod.allayvariants.registry.ModEnchantmentEffects;
 import dev.jett.topomod.allayvariants.registry.ModEntities;
 import dev.jett.topomod.allayvariants.registry.ModItems;
@@ -25,12 +28,15 @@ public class AllayVariantsMod implements ModInitializer {
 	public void onInitialize() {
 		BunnayAi.register(); // before the entities: the Brain registers its memory and sensor types
 		ModEnchantmentEffects.register();
+		ModAttachments.register();
+		ModEffects.register();
 		ModEntities.register();
 		ModMenus.register();
 		ModSounds.register();
 		ModItems.register();
 		ModLoot.register();
 		BunnayBreeding.register();
+		SpiritFoxCommand.register(); // DEBUG-TEMP: remove with the command
 		LOGGER.info("Allay Variants loaded");
 	}
 

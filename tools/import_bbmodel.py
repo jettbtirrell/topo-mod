@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn a saved Blockbench project into the game's model code and texture.
 
-Usage (from the repo root):
+Usage (from the repo root; add --unrotated-ground for a model with rotated bones, see below):
     python3 tools/import_bbmodel.py topo
     python3 tools/import_bbmodel.py bunnay
     python3 tools/import_bbmodel.py <project.bbmodel> <model.java> <texture.png>
@@ -30,8 +30,12 @@ PRESETS = {
 }
 
 
+# A model with rotated bones (a fox's tilted body, say) has cubes whose resting position is below the ground until the rotation is
+# applied, so by default the lowest cube is not the ground. --unrotated-ground finds the ground from the cubes that are not under a rotated bone.
+UNROTATED_GROUND = "--unrotated-ground" in sys.argv
+
 def paths():
-    args = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) == 1 and args[0] in PRESETS:
         return [os.path.join(ROOT, p) for p in PRESETS[args[0]]]
     if len(args) == 3:
@@ -75,7 +79,22 @@ def main():
         return (u, v, u + 2 * d + 2 * w, v + d + h)
 
     # Snap the model to the ground: the lowest cube bottom (y up) becomes y = 0, like vanilla mobs.
-    ground = min(e["from"][1] for e in data["elements"])
+    def unrotated_cubes():
+        found = []
+        def walk(node, rotated):
+            node = resolve(node)
+            if isinstance(node, str):
+                if not rotated:
+                    found.append(elements[node])
+                return
+            now = rotated or any(abs(r) > 1e-6 for r in node.get("rotation", [0, 0, 0]))
+            for child in node.get("children", []):
+                walk(child, now)
+        for top in data["outliner"]:
+            walk(top, False)
+        return found
+    ground_cubes = (unrotated_cubes() if UNROTATED_GROUND else []) or list(data["elements"])
+    ground = min(e["from"][1] for e in ground_cubes)
     if abs(ground) > 1e-6:
         infos.append(f"model was {ground:g} px above the ground in Blockbench; lowered it to stand on the ground in game")
 
@@ -91,8 +110,9 @@ def main():
 
     def cube_call(e, origin, indent, warn_name):
         """addBox(...) text for a cube, with coordinates relative to `origin` (Blockbench space)."""
-        if e.get("inflate"):
-            warnings.append(f"cube '{e['name']}' uses inflate, which is ignored")
+        # A cube's inflate becomes a CubeDeformation (the model class has to import it). Vanilla mobs use a tiny one (0.001) on legs and the like
+        # so that faces that line up exactly with the body's do not flicker.
+        grow = f", new CubeDeformation({jf(e['inflate'])})" if e.get("inflate") else ""
         if not e.get("box_uv", True):
             warnings.append(f"cube '{e['name']}' uses per-face UVs; switch it to box UV")
         u, v = fixed_uv(e)
@@ -100,7 +120,7 @@ def main():
         w, h, d = t[0] - f[0], t[1] - f[1], t[2] - f[2]
         ax, ay, az = f[0] - origin[0], origin[1] - t[1], f[2] - origin[2]
         mir = "true" if e.get("mirror_uv", warn_name) else "false"
-        return f"\n{indent}\t\t.mirror({mir}).texOffs({int(u)}, {int(v)}).addBox({jf(ax)}, {jf(ay)}, {jf(az)}, {jf(w)}, {jf(h)}, {jf(d)})"
+        return f"\n{indent}\t\t.mirror({mir}).texOffs({int(u)}, {int(v)}).addBox({jf(ax)}, {jf(ay)}, {jf(az)}, {jf(w)}, {jf(h)}, {jf(d)}{grow})"
 
     def pose_text(rel, mc_rot):
         if any(abs(r) > 1e-6 for r in mc_rot):

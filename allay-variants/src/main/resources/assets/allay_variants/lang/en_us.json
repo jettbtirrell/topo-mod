@@ -6,5 +6,8 @@
 	"item.allay_variants.bunnay_spawn_egg": "Bunnay Spawn Egg",
 	"item.allay_variants.greatsword": "Greatsword",
 	"item.allay_variants.music_disc_bunny": "Music Disc",
-	"jukebox_song.allay_variants.bunny": "Bunnayhop"
+	"jukebox_song.allay_variants.bunny": "Bunnayhop",
+	"effect.allay_variants.soul_fire": "Soul Fire",
+	"entity.allay_variants.spirit_fox": "Spirit Fox",
+	"item.allay_variants.spirit_fox_spawn_egg": "Spirit Fox Spawn Egg"
 }

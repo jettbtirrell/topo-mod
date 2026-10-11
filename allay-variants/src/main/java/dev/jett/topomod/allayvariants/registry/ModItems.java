@@ -28,6 +28,14 @@ public final class ModItems {
 		new SpawnEggItem(new Item.Properties().setId(BUNNAY_SPAWN_EGG_KEY).spawnEgg(ModEntities.BUNNAY))
 	);
 
+	public static final ResourceKey<Item> SPIRIT_FOX_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, AllayVariantsMod.id("spirit_fox_spawn_egg"));
+
+	public static final Item SPIRIT_FOX_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		SPIRIT_FOX_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(SPIRIT_FOX_SPAWN_EGG_KEY).spawnEgg(ModEntities.SPIRIT_FOX))
+	);
+
 	/** The song the bunny disc plays: data/allay_variants/jukebox_song/bunny.json. */
 	public static final ResourceKey<JukeboxSong> BUNNY_SONG = ResourceKey.create(Registries.JUKEBOX_SONG, AllayVariantsMod.id("bunny"));
 
@@ -76,6 +84,9 @@ public final class ModItems {
 			entries.accept(GREATSWORD);
 			entries.accept(CLUB);
 		});
-		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> entries.accept(BUNNAY_SPAWN_EGG));
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
+			entries.accept(BUNNAY_SPAWN_EGG);
+			entries.accept(SPIRIT_FOX_SPAWN_EGG);
+		});
 	}
 }
