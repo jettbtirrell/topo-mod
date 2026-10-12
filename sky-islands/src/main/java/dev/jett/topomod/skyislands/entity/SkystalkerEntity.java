@@ -32,6 +32,10 @@ public class SkystalkerEntity extends Monster {
 		this.goalSelector.addGoal(4, new RandomLookAroundGoal(this));
 		this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
 		this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));
+		// Its prey: the grazers of the islands.
+		this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, PlumecowEntity.class, true));
+		this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, PuffsheepEntity.class, true));
+		this.targetSelector.addGoal(4, new NearestAttackableTargetGoal<>(this, BlubEntity.class, true));
 	}
 
 	public static AttributeSupplier.Builder createAttributes() {
