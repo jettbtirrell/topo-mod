@@ -13,11 +13,6 @@
         "spawns_by_category": {
           "creature": [
             {
-              "type": "minecraft:chicken",
-              "count": 4,
-              "weight": 10
-            },
-            {
               "type": "sky_islands:blub",
               "count": 4,
               "weight": 10
@@ -27,7 +22,8 @@
       },
       "modifier": "overlay"
     },
-    "minecraft:visual/fog_color": "#bd97f7"
+    "minecraft:visual/fog_color": "#bd97f7",
+    "minecraft:visual/sky_color": "#78a7ff"
   },
   "carvers": [
     "minecraft:cave",
@@ -91,17 +87,9 @@
       "minecraft:spring_lava"
     ],
     [
-      "minecraft:glow_lichen",
-      "minecraft:forest_flowers",
       "sky_islands:olum_trees",
       "minecraft:patch_bush",
-      "minecraft:flower_default",
-      "minecraft:patch_grass_forest",
-      "minecraft:brown_mushroom_normal",
-      "minecraft:red_mushroom_normal",
-      "minecraft:patch_pumpkin",
-      "minecraft:patch_sugar_cane",
-      "minecraft:patch_firefly_bush_near_water"
+      "minecraft:patch_grass_forest"
     ],
     [
       "minecraft:freeze_top_layer"
