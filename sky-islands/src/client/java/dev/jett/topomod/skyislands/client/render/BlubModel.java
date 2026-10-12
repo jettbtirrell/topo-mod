@@ -1,5 +1,6 @@
 package dev.jett.topomod.skyislands.client.render;
 
+import net.minecraft.client.animation.KeyframeAnimation;
 import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
@@ -7,17 +8,19 @@ import net.minecraft.client.model.geom.builders.CubeListBuilder;
 import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
 import net.minecraft.client.model.geom.builders.PartDefinition;
-import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.util.Mth;
 
 // Blub: the cube layout below is generated from sky-islands/art/blub.bbmodel by `python3 tools/import_bbmodel.py blub`;
 // the animation under it relies on these part names (the ears are children of the body), so keep them if the model is edited.
-public class BlubModel extends EntityModel<LivingEntityRenderState> {
+public class BlubModel extends EntityModel<BlubRenderState> {
 	private final ModelPart body;
 	private final ModelPart frontLeftLeg;
 	private final ModelPart frontRightLeg;
 	private final ModelPart backLeftLeg;
 	private final ModelPart backRightLeg;
+	private final ModelPart leftEar;
+	private final ModelPart rightEar;
+	private final KeyframeAnimation idleAnimation;
 
 	public BlubModel(ModelPart root) {
 		super(root);
@@ -26,6 +29,9 @@ public class BlubModel extends EntityModel<LivingEntityRenderState> {
 		this.frontRightLeg = root.getChild("front_right_leg");
 		this.backLeftLeg = root.getChild("back_left_leg");
 		this.backRightLeg = root.getChild("back_right_leg");
+		this.leftEar = this.body.getChild("left_ear");
+		this.rightEar = this.body.getChild("right_ear");
+		this.idleAnimation = BlubAnimation.IDLE.bake(root);
 	}
 
 	public static LayerDefinition createBodyLayer() {
@@ -78,12 +84,19 @@ public class BlubModel extends EntityModel<LivingEntityRenderState> {
 	private static final float FULL_SPEED = 0.3F;
 
 	@Override
-	public void setupAnim(LivingEntityRenderState state) {
+	public void setupAnim(BlubRenderState state) {
 		super.setupAnim(state);
 
 		// The face is on the north side of the cubes in Blockbench, which is the side the game treats as the back, so the whole model
 		// is turned around. (The leg pattern below looks the same turned around, so it needs no change.)
 		this.root.yRot = Mth.PI;
+
+		// Sitting: a squat little loaf with its ears drooped, breathing slowly; the walk and the idle do not apply.
+		if (state.isSitting) {
+			this.animateSit(state);
+			return;
+		}
+		this.body.y = BODY_Y;
 
 		// Standing still, everything is at rest; walking fades the effect in.
 		float amount = Math.min(state.walkAnimationSpeed / FULL_SPEED, 1.0F);
@@ -114,5 +127,34 @@ public class BlubModel extends EntityModel<LivingEntityRenderState> {
 		this.backLeftLeg.xRot = -swing;
 		this.frontRightLeg.xRot = -swing;
 		this.backRightLeg.xRot = swing;
+
+		// The keyframed idle goes on last: it is an offset from the pose above.
+		this.idleAnimation.apply(state.idleAnimationState, state.ageInTicks);
+	}
+
+	/** The body's height in the rest pose (the same 22 as in the layer above). */
+	private static final float BODY_Y = 22.0F;
+	/** How far the body sinks when sitting, in pixels: the legs are tucked under it. */
+	private static final float SIT_DROP = 1.5F;
+	/** How far each ear droops outward when sitting, in radians (about 28 degrees); a positive roll tips the left ear outward. */
+	private static final float EAR_DROOP = 0.5F;
+
+	private void animateSit(BlubRenderState state) {
+		float breath = Mth.sin(state.ageInTicks * 0.12F) * 0.015F;
+		this.body.y = BODY_Y + SIT_DROP;
+		this.body.zRot = 0.0F;
+		this.body.xScale = 1.07F;
+		this.body.zScale = 1.07F;
+		this.body.yScale = 0.88F + breath;
+		this.leftEar.zRot = EAR_DROOP;
+		this.rightEar.zRot = -EAR_DROOP;
+		for (ModelPart leg : new ModelPart[] {this.frontLeftLeg, this.frontRightLeg, this.backLeftLeg, this.backRightLeg}) {
+			leg.xRot = 0.0F;
+			leg.xScale = 1.07F;
+			leg.zScale = 1.07F;
+		}
+		// The front paws poke out ahead a little (a negative xRot swings a leg forward).
+		this.frontLeftLeg.xRot = -0.5F;
+		this.frontRightLeg.xRot = -0.5F;
 	}
 }

@@ -6,10 +6,9 @@ import dev.jett.topomod.skyislands.entity.BlubEntity;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
-import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.resources.Identifier;
 
-public class BlubRenderer extends MobRenderer<BlubEntity, LivingEntityRenderState, BlubModel> {
+public class BlubRenderer extends MobRenderer<BlubEntity, BlubRenderState, BlubModel> {
 	public static final ModelLayerLocation LAYER = new ModelLayerLocation(SkyIslandsMod.id("blub"), "main");
 	private static final Identifier TEXTURE = SkyIslandsMod.id("textures/entity/blub/blub.png");
 
@@ -18,12 +17,19 @@ public class BlubRenderer extends MobRenderer<BlubEntity, LivingEntityRenderStat
 	}
 
 	@Override
-	public Identifier getTextureLocation(LivingEntityRenderState state) {
+	public Identifier getTextureLocation(BlubRenderState state) {
 		return TEXTURE;
 	}
 
 	@Override
-	public LivingEntityRenderState createRenderState() {
-		return new LivingEntityRenderState();
+	public BlubRenderState createRenderState() {
+		return new BlubRenderState();
+	}
+
+	@Override
+	public void extractRenderState(BlubEntity entity, BlubRenderState state, float partialTicks) {
+		super.extractRenderState(entity, state, partialTicks);
+		state.idleAnimationState.copyFrom(entity.idleAnimationState);
+		state.isSitting = entity.isInSittingPose();
 	}
 }
