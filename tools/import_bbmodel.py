@@ -9,6 +9,8 @@ Usage (from the repo root; add --unrotated-ground for a model with rotated bones
     python3 tools/import_bbmodel.py plumecow
     python3 tools/import_bbmodel.py puffsheep
     python3 tools/import_bbmodel.py blubird
+    python3 tools/import_bbmodel.py angel
+    python3 tools/import_bbmodel.py stormcloud
     python3 tools/import_bbmodel.py <project.bbmodel> <model.java> <texture.png>
 
 The first two use the known paths for that mob (see PRESETS). For anything else, pass the project, the model class to
@@ -52,6 +54,16 @@ PRESETS = {
         "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/BlubirdModel.java",
         "sky-islands/src/main/resources/assets/sky_islands/textures/entity/blubird/blubird.png",
     ),
+    "angel": (
+        "sky-islands/art/angel.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/AngelModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/angel/angel.png",
+    ),
+    "stormcloud": (
+        "sky-islands/art/stormcloud.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/StormcloudModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/stormcloud/stormcloud.png",
+    ),
     "bunnay": (
         "allay-variants/art/bunnay.bbmodel",
         "allay-variants/src/client/java/dev/jett/topomod/allayvariants/client/render/BunnayModel.java",
@@ -63,6 +75,9 @@ PRESETS = {
 # A model with rotated bones (a fox's tilted body, say) has cubes whose resting position is below the ground until the rotation is
 # applied, so by default the lowest cube is not the ground. --unrotated-ground finds the ground from the cubes that are not under a rotated bone.
 UNROTATED_GROUND = "--unrotated-ground" in sys.argv
+
+# Models whose origin matters (the stormcloud's core has to line up with the hitbox, and its cloud reaches below it) are not snapped to the ground.
+KEEP_ORIGIN = any("stormcloud" in a for a in sys.argv[1:])
 
 def paths():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -125,6 +140,8 @@ def main():
         return found
     ground_cubes = (unrotated_cubes() if UNROTATED_GROUND else []) or list(data["elements"])
     ground = min(e["from"][1] for e in ground_cubes)
+    if KEEP_ORIGIN:
+        ground = 0
     if abs(ground) > 1e-6:
         infos.append(f"model was {ground:g} px above the ground in Blockbench; lowered it to stand on the ground in game")
 

@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "sky_islands:item/stormcloud_spawn_egg"
+  }
+}

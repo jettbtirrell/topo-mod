@@ -11,6 +11,7 @@ public class SkyIslandsMod implements ModInitializer {
 	public void onInitialize() {
 		ModBlocks.register();
 		ModEntities.register();
+		ModFeatures.register();
 	}
 
 	public static Identifier id(String path) {

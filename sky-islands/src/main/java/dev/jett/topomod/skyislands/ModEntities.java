@@ -1,10 +1,12 @@
 package dev.jett.topomod.skyislands;
 
+import dev.jett.topomod.skyislands.entity.AngelEntity;
 import dev.jett.topomod.skyislands.entity.BlubEntity;
 import dev.jett.topomod.skyislands.entity.BlubirdEntity;
 import dev.jett.topomod.skyislands.entity.PlumecowEntity;
 import dev.jett.topomod.skyislands.entity.PuffsheepEntity;
 import dev.jett.topomod.skyislands.entity.SkystalkerEntity;
+import dev.jett.topomod.skyislands.entity.StormcloudEntity;
 
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
@@ -130,6 +132,47 @@ public final class ModEntities {
 		new SpawnEggItem(new Item.Properties().setId(BLUBIRD_SPAWN_EGG_KEY).spawnEgg(BLUBIRD))
 	);
 
+	public static final ResourceKey<EntityType<?>> ANGEL_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SkyIslandsMod.id("angel"));
+
+	public static final EntityType<AngelEntity> ANGEL = Registry.register(
+		BuiltInRegistries.ENTITY_TYPE,
+		ANGEL_KEY,
+		EntityType.Builder.of(AngelEntity::new, MobCategory.CREATURE)
+			.sized(0.5F, 1.4F)
+			.eyeHeight(1.25F)
+			.clientTrackingRange(8)
+			.build(ANGEL_KEY)
+	);
+
+	public static final ResourceKey<Item> ANGEL_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, SkyIslandsMod.id("angel_spawn_egg"));
+
+	public static final Item ANGEL_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		ANGEL_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(ANGEL_SPAWN_EGG_KEY).spawnEgg(ANGEL))
+	);
+
+	public static final ResourceKey<EntityType<?>> STORMCLOUD_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SkyIslandsMod.id("stormcloud"));
+
+	/** The hitbox is only the core (0.6 blocks); the cloud around it is a damage zone, see StormcloudEntity. */
+	public static final EntityType<StormcloudEntity> STORMCLOUD = Registry.register(
+		BuiltInRegistries.ENTITY_TYPE,
+		STORMCLOUD_KEY,
+		EntityType.Builder.of(StormcloudEntity::new, MobCategory.MONSTER)
+			.sized(0.6F, 0.6F)
+			.eyeHeight(0.3F)
+			.clientTrackingRange(10)
+			.build(STORMCLOUD_KEY)
+	);
+
+	public static final ResourceKey<Item> STORMCLOUD_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, SkyIslandsMod.id("stormcloud_spawn_egg"));
+
+	public static final Item STORMCLOUD_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		STORMCLOUD_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(STORMCLOUD_SPAWN_EGG_KEY).spawnEgg(STORMCLOUD))
+	);
+
 	private ModEntities() {
 	}
 
@@ -143,6 +186,9 @@ public final class ModEntities {
 		SpawnPlacements.register(PUFFSHEEP, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, ModEntities::spawnsOnGrass);
 		FabricDefaultAttributeRegistry.register(BLUBIRD, BlubirdEntity.createAttributes());
 		SpawnPlacements.register(BLUBIRD, SpawnPlacementTypes.NO_RESTRICTIONS, Heightmap.Types.MOTION_BLOCKING, BlubirdEntity::checkSpawnRules);
+		FabricDefaultAttributeRegistry.register(ANGEL, AngelEntity.createAttributes());
+		FabricDefaultAttributeRegistry.register(STORMCLOUD, StormcloudEntity.createAttributes());
+		SpawnPlacements.register(STORMCLOUD, SpawnPlacementTypes.NO_RESTRICTIONS, Heightmap.Types.MOTION_BLOCKING, StormcloudEntity::checkSpawnRules);
 		FabricDefaultAttributeRegistry.register(SKYSTALKER, SkystalkerEntity.createAttributes());
 		// Any light: the dimension is bright all day, and the vanilla monster rule would wait for dark.
 		SpawnPlacements.register(SKYSTALKER, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Monster::checkAnyLightMonsterSpawnRules);
@@ -152,6 +198,8 @@ public final class ModEntities {
 			entries.accept(PLUMECOW_SPAWN_EGG);
 			entries.accept(PUFFSHEEP_SPAWN_EGG);
 			entries.accept(BLUBIRD_SPAWN_EGG);
+			entries.accept(ANGEL_SPAWN_EGG);
+			entries.accept(STORMCLOUD_SPAWN_EGG);
 		});
 	}
 

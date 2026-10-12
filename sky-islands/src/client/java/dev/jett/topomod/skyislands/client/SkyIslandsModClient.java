@@ -1,6 +1,8 @@
 package dev.jett.topomod.skyislands.client;
 
 import dev.jett.topomod.skyislands.ModEntities;
+import dev.jett.topomod.skyislands.client.render.AngelModel;
+import dev.jett.topomod.skyislands.client.render.AngelRenderer;
 import dev.jett.topomod.skyislands.client.render.BlubModel;
 import dev.jett.topomod.skyislands.client.render.BlubirdModel;
 import dev.jett.topomod.skyislands.client.render.BlubirdRenderer;
@@ -11,6 +13,8 @@ import dev.jett.topomod.skyislands.client.render.PuffsheepModel;
 import dev.jett.topomod.skyislands.client.render.PuffsheepRenderer;
 import dev.jett.topomod.skyislands.client.render.SkystalkerModel;
 import dev.jett.topomod.skyislands.client.render.SkystalkerRenderer;
+import dev.jett.topomod.skyislands.client.render.StormcloudModel;
+import dev.jett.topomod.skyislands.client.render.StormcloudRenderer;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
@@ -29,5 +33,9 @@ public class SkyIslandsModClient implements ClientModInitializer {
 		EntityRendererRegistry.register(ModEntities.PUFFSHEEP, PuffsheepRenderer::new);
 		ModelLayerRegistry.registerModelLayer(BlubirdRenderer.LAYER, BlubirdModel::createBodyLayer);
 		EntityRendererRegistry.register(ModEntities.BLUBIRD, BlubirdRenderer::new);
+		ModelLayerRegistry.registerModelLayer(AngelRenderer.LAYER, AngelModel::createBodyLayer);
+		EntityRendererRegistry.register(ModEntities.ANGEL, AngelRenderer::new);
+		ModelLayerRegistry.registerModelLayer(StormcloudRenderer.LAYER, StormcloudModel::createBodyLayer);
+		EntityRendererRegistry.register(ModEntities.STORMCLOUD, StormcloudRenderer::new);
 	}
 }

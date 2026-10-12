@@ -15,5 +15,9 @@
   "entity.sky_islands.puffsheep": "Puffsheep",
   "item.sky_islands.puffsheep_spawn_egg": "Puffsheep Spawn Egg",
   "entity.sky_islands.blubird": "Blubird",
-  "item.sky_islands.blubird_spawn_egg": "Blubird Spawn Egg"
+  "item.sky_islands.blubird_spawn_egg": "Blubird Spawn Egg",
+  "entity.sky_islands.angel": "Angel",
+  "item.sky_islands.angel_spawn_egg": "Angel Spawn Egg",
+  "entity.sky_islands.stormcloud": "Stormcloud",
+  "item.sky_islands.stormcloud_spawn_egg": "Stormcloud Spawn Egg"
 }
