@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1,
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "sky_islands:sky_stone"
+        }
+      ]
+    }
+  ],
+  "random_sequence": "sky_islands:blocks/sky_stone"
+}

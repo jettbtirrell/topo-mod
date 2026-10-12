@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "bottom": "sky_islands:block/sky_dirt",
+    "side": "sky_islands:block/sky_grass_block_side",
+    "top": "sky_islands:block/sky_grass_block_top"
+  }
+}

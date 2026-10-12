@@ -1,6 +1,8 @@
 {
   "type": "minecraft:tree",
-  "below_trunk_provider": "minecraft:soil_beneath_tree",
+  "below_trunk_provider": {
+    "id": "sky_islands:sky_dirt"
+  },
   "decorators": [],
   "foliage_placer": {
     "type": "minecraft:blob_foliage_placer",

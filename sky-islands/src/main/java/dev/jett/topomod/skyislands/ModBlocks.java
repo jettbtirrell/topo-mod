@@ -27,6 +27,11 @@ public final class ModBlocks {
 		"olum_leaves", p -> new LeavesBlock(AmbientLeavesBlockSoundPlayer.noAmbientSound(), p), Blocks.BIRCH_LEAVES
 	);
 
+	// The dimension's own ground: plain blocks (no spreading or biome tint) so the textures show exactly as painted.
+	public static final Block SKY_DIRT = register("sky_dirt", Block::new, Blocks.DIRT);
+	public static final Block SKY_GRASS_BLOCK = register("sky_grass_block", Block::new, Blocks.GRASS_BLOCK);
+	public static final Block SKY_STONE = register("sky_stone", Block::new, Blocks.STONE);
+
 	private ModBlocks() {
 	}
 
@@ -49,6 +54,9 @@ public final class ModBlocks {
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.NATURAL_BLOCKS).register(entries -> {
 			entries.accept(OLUM_LOG);
 			entries.accept(OLUM_LEAVES);
+			entries.accept(SKY_GRASS_BLOCK);
+			entries.accept(SKY_DIRT);
+			entries.accept(SKY_STONE);
 		});
 	}
 }

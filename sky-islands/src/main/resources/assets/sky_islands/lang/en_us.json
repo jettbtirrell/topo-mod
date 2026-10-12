@@ -3,6 +3,9 @@
   "block.sky_islands.olum_wood": "Olum Wood",
   "block.sky_islands.olum_planks": "Olum Planks",
   "block.sky_islands.olum_leaves": "Olum Leaves",
+  "block.sky_islands.sky_grass_block": "Sky Grass Block",
+  "block.sky_islands.sky_dirt": "Sky Dirt",
+  "block.sky_islands.sky_stone": "Sky Stone",
   "entity.sky_islands.blub": "Blub",
   "item.sky_islands.blub_spawn_egg": "Blub Spawn Egg"
 }

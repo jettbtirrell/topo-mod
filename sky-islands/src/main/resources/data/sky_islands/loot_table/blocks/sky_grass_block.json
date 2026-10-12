@@ -1,0 +1,28 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1,
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "condition": "minecraft:tool/can_silk_touch",
+              "name": "sky_islands:sky_grass_block"
+            },
+            {
+              "type": "minecraft:item",
+              "name": "sky_islands:sky_dirt"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "random_sequence": "sky_islands:blocks/sky_grass_block"
+}

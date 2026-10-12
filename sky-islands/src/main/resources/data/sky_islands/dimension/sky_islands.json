@@ -2,7 +2,7 @@
   "type": "sky_islands:sky_islands",
   "generator": {
     "type": "minecraft:noise",
-    "settings": "minecraft:overworld",
+    "settings": "sky_islands:overworld",
     "biome_source": {
       "type": "minecraft:fixed",
       "biome": "sky_islands:forest"

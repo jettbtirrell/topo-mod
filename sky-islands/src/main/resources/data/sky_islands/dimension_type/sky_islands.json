@@ -1,5 +1,5 @@
 {
-  "ambient_light": 0.2,
+  "ambient_light": 0.0,
   "attributes": {
     "minecraft:audio/ambient_sounds": {
       "mood": {
@@ -22,21 +22,16 @@
       }
     },
     "minecraft:gameplay/bed_rule": {
-      "can_set_spawn": "always",
-      "can_sleep": "when_dark",
-      "error_message": {
-        "translate": "block.minecraft.bed.no_sleep"
-      }
+      "can_set_spawn": "never",
+      "can_sleep": "never",
+      "destroy_on_use": true
     },
     "minecraft:gameplay/nether_portal_spawns_piglin": true,
     "minecraft:gameplay/respawn_anchor_works": false,
     "minecraft:gameplay/straw_bed_rule": {
       "can_set_spawn": "never",
-      "can_sleep": "when_dark",
-      "destroy_on_leave": true,
-      "error_message": {
-        "translate": "block.minecraft.bed.no_sleep"
-      }
+      "can_sleep": "never",
+      "destroy_on_use": true
     },
     "minecraft:visual/ambient_light_color": "#0a0a0a",
     "minecraft:visual/fog_color": "#c0d8ff",
@@ -47,6 +42,7 @@
   "default_clock": "minecraft:overworld",
   "has_ceiling": false,
   "has_ender_dragon_fight": false,
+  "has_fixed_time": true,
   "has_skylight": true,
   "height": 384,
   "infiniburn": "#minecraft:infiniburn_overworld",
@@ -59,5 +55,5 @@
     "min_inclusive": 0
   },
   "timelines": "#minecraft:in_overworld",
-  "skybox": "overworld"
+  "skybox": "none"
 }
