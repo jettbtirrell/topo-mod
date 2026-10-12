@@ -1,0 +1,16 @@
+{
+  "variants": {
+    "axis=x": {
+      "model": "sky_islands:block/olum_wood_horizontal",
+      "x": 90,
+      "y": 90
+    },
+    "axis=y": {
+      "model": "sky_islands:block/olum_wood"
+    },
+    "axis=z": {
+      "model": "sky_islands:block/olum_wood_horizontal",
+      "x": 90
+    }
+  }
+}

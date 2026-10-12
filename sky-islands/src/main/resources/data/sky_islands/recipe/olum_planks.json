@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "group": "planks",
+  "ingredients": [
+    "#sky_islands:olum_logs"
+  ],
+  "result": {
+    "id": "sky_islands:olum_planks",
+    "count": 4
+  }
+}

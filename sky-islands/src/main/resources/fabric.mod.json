@@ -14,5 +14,13 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
+	},
+	"entrypoints": {
+		"main": [
+			"dev.jett.topomod.skyislands.SkyIslandsMod"
+		],
+		"client": [
+			"dev.jett.topomod.skyislands.client.SkyIslandsModClient"
+		]
 	}
 }
