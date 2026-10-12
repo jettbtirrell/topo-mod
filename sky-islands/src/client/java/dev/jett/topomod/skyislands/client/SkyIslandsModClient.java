@@ -2,6 +2,8 @@ package dev.jett.topomod.skyislands.client;
 
 import dev.jett.topomod.skyislands.ModEntities;
 import dev.jett.topomod.skyislands.client.render.BlubModel;
+import dev.jett.topomod.skyislands.client.render.BlubirdModel;
+import dev.jett.topomod.skyislands.client.render.BlubirdRenderer;
 import dev.jett.topomod.skyislands.client.render.BlubRenderer;
 import dev.jett.topomod.skyislands.client.render.PlumecowModel;
 import dev.jett.topomod.skyislands.client.render.PlumecowRenderer;
@@ -25,5 +27,7 @@ public class SkyIslandsModClient implements ClientModInitializer {
 		EntityRendererRegistry.register(ModEntities.PLUMECOW, PlumecowRenderer::new);
 		ModelLayerRegistry.registerModelLayer(PuffsheepRenderer.LAYER, PuffsheepModel::createBodyLayer);
 		EntityRendererRegistry.register(ModEntities.PUFFSHEEP, PuffsheepRenderer::new);
+		ModelLayerRegistry.registerModelLayer(BlubirdRenderer.LAYER, BlubirdModel::createBodyLayer);
+		EntityRendererRegistry.register(ModEntities.BLUBIRD, BlubirdRenderer::new);
 	}
 }

@@ -8,6 +8,7 @@ Usage (from the repo root; add --unrotated-ground for a model with rotated bones
     python3 tools/import_bbmodel.py skystalker
     python3 tools/import_bbmodel.py plumecow
     python3 tools/import_bbmodel.py puffsheep
+    python3 tools/import_bbmodel.py blubird
     python3 tools/import_bbmodel.py <project.bbmodel> <model.java> <texture.png>
 
 The first two use the known paths for that mob (see PRESETS). For anything else, pass the project, the model class to
@@ -45,6 +46,11 @@ PRESETS = {
         "sky-islands/art/puffsheep.bbmodel",
         "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/PuffsheepModel.java",
         "sky-islands/src/main/resources/assets/sky_islands/textures/entity/puffsheep/puffsheep.png",
+    ),
+    "blubird": (
+        "sky-islands/art/blubird.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/BlubirdModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/blubird/blubird.png",
     ),
     "bunnay": (
         "allay-variants/art/bunnay.bbmodel",

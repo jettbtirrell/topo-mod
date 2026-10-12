@@ -34,6 +34,17 @@
               "count": 1,
               "weight": 4
             }
+          ],
+          "ambient": [
+            {
+              "type": "sky_islands:blubird",
+              "count": {
+                "type": "minecraft:uniform",
+                "min_inclusive": 2,
+                "max_inclusive": 4
+              },
+              "weight": 10
+            }
           ]
         }
       },

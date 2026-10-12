@@ -1,6 +1,7 @@
 package dev.jett.topomod.skyislands;
 
 import dev.jett.topomod.skyislands.entity.BlubEntity;
+import dev.jett.topomod.skyislands.entity.BlubirdEntity;
 import dev.jett.topomod.skyislands.entity.PlumecowEntity;
 import dev.jett.topomod.skyislands.entity.PuffsheepEntity;
 import dev.jett.topomod.skyislands.entity.SkystalkerEntity;
@@ -109,6 +110,26 @@ public final class ModEntities {
 		new SpawnEggItem(new Item.Properties().setId(PUFFSHEEP_SPAWN_EGG_KEY).spawnEgg(PUFFSHEEP))
 	);
 
+	public static final ResourceKey<EntityType<?>> BLUBIRD_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SkyIslandsMod.id("blubird"));
+
+	public static final EntityType<BlubirdEntity> BLUBIRD = Registry.register(
+		BuiltInRegistries.ENTITY_TYPE,
+		BLUBIRD_KEY,
+		EntityType.Builder.of(BlubirdEntity::new, MobCategory.AMBIENT)
+			.sized(0.5F, 0.5F)
+			.eyeHeight(0.35F)
+			.clientTrackingRange(8)
+			.build(BLUBIRD_KEY)
+	);
+
+	public static final ResourceKey<Item> BLUBIRD_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, SkyIslandsMod.id("blubird_spawn_egg"));
+
+	public static final Item BLUBIRD_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		BLUBIRD_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(BLUBIRD_SPAWN_EGG_KEY).spawnEgg(BLUBIRD))
+	);
+
 	private ModEntities() {
 	}
 
@@ -120,6 +141,8 @@ public final class ModEntities {
 		FabricDefaultAttributeRegistry.register(PUFFSHEEP, PuffsheepEntity.createAttributes());
 		SpawnPlacements.register(PLUMECOW, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, ModEntities::spawnsOnGrass);
 		SpawnPlacements.register(PUFFSHEEP, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, ModEntities::spawnsOnGrass);
+		FabricDefaultAttributeRegistry.register(BLUBIRD, BlubirdEntity.createAttributes());
+		SpawnPlacements.register(BLUBIRD, SpawnPlacementTypes.NO_RESTRICTIONS, Heightmap.Types.MOTION_BLOCKING, BlubirdEntity::checkSpawnRules);
 		FabricDefaultAttributeRegistry.register(SKYSTALKER, SkystalkerEntity.createAttributes());
 		// Any light: the dimension is bright all day, and the vanilla monster rule would wait for dark.
 		SpawnPlacements.register(SKYSTALKER, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Monster::checkAnyLightMonsterSpawnRules);
@@ -128,6 +151,7 @@ public final class ModEntities {
 			entries.accept(SKYSTALKER_SPAWN_EGG);
 			entries.accept(PLUMECOW_SPAWN_EGG);
 			entries.accept(PUFFSHEEP_SPAWN_EGG);
+			entries.accept(BLUBIRD_SPAWN_EGG);
 		});
 	}
 
