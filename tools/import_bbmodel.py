@@ -5,6 +5,9 @@ Usage (from the repo root; add --unrotated-ground for a model with rotated bones
     python3 tools/import_bbmodel.py topo
     python3 tools/import_bbmodel.py bunnay
     python3 tools/import_bbmodel.py blub
+    python3 tools/import_bbmodel.py skystalker
+    python3 tools/import_bbmodel.py plumecow
+    python3 tools/import_bbmodel.py puffsheep
     python3 tools/import_bbmodel.py <project.bbmodel> <model.java> <texture.png>
 
 The first two use the known paths for that mob (see PRESETS). For anything else, pass the project, the model class to
@@ -27,6 +30,21 @@ PRESETS = {
         "sky-islands/art/blub.bbmodel",
         "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/BlubModel.java",
         "sky-islands/src/main/resources/assets/sky_islands/textures/entity/blub/blub.png",
+    ),
+    "skystalker": (
+        "sky-islands/art/skystalker.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/SkystalkerModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/skystalker/skystalker.png",
+    ),
+    "plumecow": (
+        "sky-islands/art/plumecow.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/PlumecowModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/plumecow/plumecow.png",
+    ),
+    "puffsheep": (
+        "sky-islands/art/puffsheep.bbmodel",
+        "sky-islands/src/client/java/dev/jett/topomod/skyislands/client/render/PuffsheepModel.java",
+        "sky-islands/src/main/resources/assets/sky_islands/textures/entity/puffsheep/puffsheep.png",
     ),
     "bunnay": (
         "allay-variants/art/bunnay.bbmodel",
