@@ -7,5 +7,7 @@
   "block.sky_islands.sky_dirt": "Sky Dirt",
   "block.sky_islands.sky_stone": "Sky Stone",
   "entity.sky_islands.blub": "Blub",
-  "item.sky_islands.blub_spawn_egg": "Blub Spawn Egg"
+  "item.sky_islands.blub_spawn_egg": "Blub Spawn Egg",
+  "entity.sky_islands.skystalker": "Skystalker",
+  "item.sky_islands.skystalker_spawn_egg": "Skystalker Spawn Egg"
 }

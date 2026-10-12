@@ -81,8 +81,7 @@ public class BlubModel extends EntityModel<LivingEntityRenderState> {
 	public void setupAnim(LivingEntityRenderState state) {
 		super.setupAnim(state);
 
-		// The face is on the north side of the cubes in Blockbench, which is the side the game treats as the back, so the whole model
-		// is turned around. (The leg pattern below looks the same turned around, so it needs no change.)
+		// The blub needs turning around to face the way it walks; the skystalker, modelled the usual way, does not.
 		this.root.yRot = Mth.PI;
 
 		// Standing still, everything is at rest; walking fades the effect in.

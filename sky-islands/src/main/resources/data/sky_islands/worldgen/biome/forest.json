@@ -17,6 +17,13 @@
               "count": 4,
               "weight": 10
             }
+          ],
+          "monster": [
+            {
+              "type": "sky_islands:skystalker",
+              "count": 1,
+              "weight": 4
+            }
           ]
         }
       },

@@ -1,6 +1,7 @@
 package dev.jett.topomod.skyislands;
 
 import dev.jett.topomod.skyislands.entity.BlubEntity;
+import dev.jett.topomod.skyislands.entity.SkystalkerEntity;
 
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
@@ -15,6 +16,7 @@ import net.minecraft.world.entity.SpawnPlacementTypes;
 import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.level.levelgen.Heightmap;
 
@@ -39,6 +41,26 @@ public final class ModEntities {
 		new SpawnEggItem(new Item.Properties().setId(BLUB_SPAWN_EGG_KEY).spawnEgg(BLUB))
 	);
 
+	public static final ResourceKey<EntityType<?>> SKYSTALKER_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SkyIslandsMod.id("skystalker"));
+
+	public static final EntityType<SkystalkerEntity> SKYSTALKER = Registry.register(
+		BuiltInRegistries.ENTITY_TYPE,
+		SKYSTALKER_KEY,
+		EntityType.Builder.of(SkystalkerEntity::new, MobCategory.MONSTER)
+			.sized(0.9F, 2.6F)
+			.eyeHeight(2.3F)
+			.clientTrackingRange(8)
+			.build(SKYSTALKER_KEY)
+	);
+
+	public static final ResourceKey<Item> SKYSTALKER_SPAWN_EGG_KEY = ResourceKey.create(Registries.ITEM, SkyIslandsMod.id("skystalker_spawn_egg"));
+
+	public static final Item SKYSTALKER_SPAWN_EGG = Registry.register(
+		BuiltInRegistries.ITEM,
+		SKYSTALKER_SPAWN_EGG_KEY,
+		new SpawnEggItem(new Item.Properties().setId(SKYSTALKER_SPAWN_EGG_KEY).spawnEgg(SKYSTALKER))
+	);
+
 	private ModEntities() {
 	}
 
@@ -46,6 +68,12 @@ public final class ModEntities {
 	public static void register() {
 		FabricDefaultAttributeRegistry.register(BLUB, BlubEntity.createAttributes());
 		SpawnPlacements.register(BLUB, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, BlubEntity::checkSpawnRules);
-		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> entries.accept(BLUB_SPAWN_EGG));
+		FabricDefaultAttributeRegistry.register(SKYSTALKER, SkystalkerEntity.createAttributes());
+		// Any light: the dimension is bright all day, and the vanilla monster rule would wait for dark.
+		SpawnPlacements.register(SKYSTALKER, SpawnPlacementTypes.ON_GROUND, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Monster::checkAnyLightMonsterSpawnRules);
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
+			entries.accept(BLUB_SPAWN_EGG);
+			entries.accept(SKYSTALKER_SPAWN_EGG);
+		});
 	}
 }
